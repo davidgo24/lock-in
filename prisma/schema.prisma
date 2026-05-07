@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Project {
+  id        String            @id @default(cuid())
+  name      String
+  isMisc    Boolean           @default(false)
+  createdAt DateTime          @default(now())
+  sessions  ActivitySession[]
+
+  @@index([isMisc])
+}
+
+model ActivitySession {
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  /// What you accomplished (log note)
+  summary     String
+  durationSec Int
+  /// Calendar day for heatmap (Postgres DATE)
+  workDate    DateTime @db.Date
+  createdAt   DateTime @default(now())
+
+  @@index([workDate])
+  @@index([projectId])
+}
+
+model AppSettings {
+  id              String @id
+  weeklyGoalHours Float  @default(7)
+}

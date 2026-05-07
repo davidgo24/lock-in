@@ -1,0 +1,156 @@
+"use client";
+
+import { useMemo } from "react";
+
+type Props = {
+  heatmap: Record<string, number>;
+};
+
+const levels = [
+  "bg-zinc-100",
+  "bg-blue-100",
+  "bg-blue-300",
+  "bg-blue-500",
+  "bg-blue-700",
+];
+
+function minuteLevel(minutes: number): number {
+  if (minutes <= 0) return 0;
+  if (minutes < 15) return 1;
+  if (minutes < 30) return 2;
+  if (minutes < 60) return 3;
+  return 4;
+}
+
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
+}
+
+function localYmd(d: Date) {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+type Cell = { key: string; minutes: number; level: number } | null;
+
+export function ContributionHeatmap({ heatmap }: Props) {
+  const { weeks, monthLabels } = useMemo(() => {
+    const end = new Date();
+    end.setHours(0, 0, 0, 0);
+    const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
+    const first = new Date(last);
+    first.setDate(first.getDate() - 364);
+
+    const gridStart = new Date(first);
+    while (gridStart.getDay() !== 0) {
+      gridStart.setDate(gridStart.getDate() - 1);
+    }
+
+    const weeks: Cell[][] = [];
+    const cur = new Date(gridStart);
+    let week: Cell[] = [];
+
+    while (cur <= last) {
+      const key = localYmd(cur);
+      const sec = heatmap[key] ?? 0;
+      const minutes = sec / 60;
+      if (cur < first) {
+        week.push(null);
+      } else {
+        week.push({ key, minutes, level: minuteLevel(minutes) });
+      }
+
+      if (cur.getDay() === 6) {
+        weeks.push(week);
+        week = [];
+      }
+      cur.setDate(cur.getDate() + 1);
+    }
+    if (week.length) {
+      while (week.length < 7) week.push(null);
+      weeks.push(week);
+    }
+
+    const monthLabels: { col: number; label: string }[] = [];
+    let lastMonth = -1;
+    weeks.forEach((w, colIdx) => {
+      const anchor = w.find((c) => c !== null) ?? w[0];
+      if (!anchor) return;
+      const d = new Date(anchor.key + "T12:00:00");
+      if (d.getMonth() !== lastMonth) {
+        lastMonth = d.getMonth();
+        monthLabels.push({
+          col: colIdx,
+          label: d.toLocaleString("en-US", { month: "short" }),
+        });
+      }
+    });
+
+    return { weeks, monthLabels };
+  }, [heatmap]);
+
+  return (
+    <div className="w-full overflow-x-auto pb-1">
+      <div className="relative min-w-[720px]">
+        <div
+          className="mb-1 grid text-[11px] text-zinc-400"
+          style={{
+            gridTemplateColumns: `28px repeat(${weeks.length}, minmax(0, 1fr))`,
+          }}
+        >
+          <div />
+          {weeks.map((_, i) => {
+            const label = monthLabels.find((m) => m.col === i)?.label ?? "";
+            return (
+              <div key={i} className="px-0.5 text-left">
+                {label}
+              </div>
+            );
+          })}
+        </div>
+
+        <div
+          className="grid items-start gap-x-[3px]"
+          style={{
+            gridTemplateColumns: `28px repeat(${weeks.length}, minmax(0, 1fr))`,
+          }}
+        >
+          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
+            (day, rowIdx) => (
+              <div key={day} className="contents">
+                <div className="flex h-[12px] items-center pr-1 text-[11px] text-zinc-400">
+                  {rowIdx % 2 === 1 ? "" : day}
+                </div>
+                {weeks.map((week, colIdx) => {
+                  const cell = week[rowIdx];
+                  return (
+                    <div
+                      key={`${colIdx}-${rowIdx}`}
+                      title={
+                        cell
+                          ? `${cell.key}: ${cell.minutes.toFixed(1)}h`
+                          : "No activity"
+                      }
+                      className={`h-[12px] w-full rounded-[2px] ${
+                        cell ? levels[cell.level] : "bg-zinc-50"
+                      }`}
+                    />
+                  );
+                })}
+              </div>
+            ),
+          )}
+        </div>
+
+        <div className="mt-3 flex items-center justify-end gap-2 text-[11px] text-zinc-500">
+          <span>Less</span>
+          <div className="flex gap-1">
+            {levels.map((c) => (
+              <div key={c} className={`h-[12px] w-[12px] rounded-[2px] ${c}`} />
+            ))}
+          </div>
+          <span>More</span>
+        </div>
+      </div>
+    </div>
+  );
+}
