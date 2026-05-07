@@ -12,6 +12,7 @@ import {
   LogOut,
   Play,
   Plus,
+  RotateCcw,
   Trash2,
   Trophy,
 } from "lucide-react";
@@ -42,6 +43,12 @@ function formatClock(totalSeconds: number) {
 
 function localYmdFromDate(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** Raw elapsed seconds → duration to store: nearest minute, at least 1 minute. */
+function secondsRoundedToNearestMinute(raw: number): number {
+  const minutes = Math.max(1, Math.round(raw / 60));
+  return minutes * 60;
 }
 
 function defaultSelectedId(projects: Project[]) {
@@ -80,6 +87,12 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
     null,
   );
   const [saveProjectId, setSaveProjectId] = useState<string | null>(null);
+  const [sessionSaveHint, setSessionSaveHint] = useState<{
+    minutes: number;
+    early: boolean;
+  } | null>(null);
+
+  const remainingRef = useRef(remaining);
 
   const loadAll = useCallback(async () => {
     const [pRes, sRes] = await Promise.all([
@@ -110,7 +123,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
 
   useEffect(() => {
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      clearTick();
     };
   }, []);
 
@@ -123,18 +136,32 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   }, [selectedId]);
 
   useEffect(() => {
+    remainingRef.current = remaining;
+  }, [remaining]);
+
+  function clearTick() {
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+  }
+
+  useEffect(() => {
     if (!running) return;
-    if (timerRef.current) clearInterval(timerRef.current);
+    clearTick();
     timerRef.current = setInterval(() => {
       setRemaining((r) => {
         if (r <= 1) {
-          if (timerRef.current) clearInterval(timerRef.current);
-          timerRef.current = null;
+          clearTick();
           setRunning(false);
           const pid = selectedIdRef.current;
           const dur = durationSecRef.current;
           completedMeta.current = { projectId: pid, durationSec: dur };
           setSaveProjectId(pid);
+          setSessionSaveHint({
+            minutes: Math.round(dur / 60),
+            early: false,
+          });
           setShowSave(true);
           void playTimerCompleteRing();
           return 0;
@@ -143,7 +170,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
       });
     }, 1000);
     return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
+      clearTick();
     };
   }, [running]);
 
@@ -174,6 +201,40 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
     }
   }
 
+  function discardSession() {
+    if (!running) return;
+    clearTick();
+    setRunning(false);
+    setRemaining(durationSecRef.current);
+  }
+
+  function stopAndLogSession() {
+    if (!running) return;
+    const total = durationSecRef.current;
+    const rem = remainingRef.current;
+    const rawElapsed = Math.max(0, total - rem);
+    if (rawElapsed < 15) {
+      clearTick();
+      setRunning(false);
+      setRemaining(total);
+      alert("Work a little longer before logging, or tap Discard.");
+      return;
+    }
+    clearTick();
+    setRunning(false);
+    const logged = secondsRoundedToNearestMinute(rawElapsed);
+    completedMeta.current = {
+      projectId: selectedIdRef.current,
+      durationSec: logged,
+    };
+    setSaveProjectId(selectedIdRef.current);
+    setSessionSaveHint({
+      minutes: Math.round(logged / 60),
+      early: true,
+    });
+    setShowSave(true);
+  }
+
   async function saveSession() {
     const meta = completedMeta.current;
     if (!meta) return;
@@ -198,6 +259,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
       setSummary("");
       completedMeta.current = null;
       setSaveProjectId(null);
+      setSessionSaveHint(null);
       setRemaining(durationSec);
       void loadAll();
     } finally {
@@ -268,6 +330,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
             setShowSave(false);
             setSaveProjectId(null);
             completedMeta.current = null;
+            setSessionSaveHint(null);
             setRemaining(durationSec);
           }}
         >
@@ -305,6 +368,13 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
             Session Completed for{" "}
             <span className="font-semibold text-blue-300">{saveProject.name}</span>
           </h2>
+          {sessionSaveHint ? (
+            <p className="mt-2 text-center text-sm text-slate-400">
+              {sessionSaveHint.early
+                ? `Logging ~${sessionSaveHint.minutes} min (rounded to the nearest minute).`
+                : `Full session: ${sessionSaveHint.minutes} min.`}
+            </p>
+          ) : null}
 
           <label className="mt-6 block text-sm font-semibold text-slate-200 sm:mt-8">
             What did you accomplish?
@@ -390,12 +460,17 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
                     strokeDashoffset={circ * (1 - progress)}
                   />
                 </svg>
-                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <div className="text-2xl font-semibold tabular-nums text-slate-100 sm:text-3xl">
-                    {arming ? "…" : formatClock(remaining)}
-                  </div>
-                  <Clock className="mt-1 h-4 w-4 text-slate-500" />
-                </div>
+            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+              <div className="text-2xl font-semibold tabular-nums text-slate-100 sm:text-3xl">
+                {arming ? "…" : formatClock(remaining)}
+              </div>
+              {running ? (
+                <span className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-blue-400/90 sm:text-xs">
+                  In progress
+                </span>
+              ) : null}
+              <Clock className="mt-1 h-4 w-4 text-slate-500" />
+            </div>
               </div>
             </div>
 
@@ -435,15 +510,43 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
               ))}
             </div>
 
-            <button
-              type="button"
-              disabled={!selectedId || running || arming}
-              onClick={() => void startTimer()}
-              className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-500 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/30 transition hover:bg-blue-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <Play className="h-4 w-4 shrink-0 fill-current" />
-              {arming ? "Get ready…" : "Start Timer"}
-            </button>
+            {!running ? (
+              <button
+                type="button"
+                disabled={!selectedId || arming}
+                onClick={() => void startTimer()}
+                className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-500 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/30 transition hover:bg-blue-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Play className="h-4 w-4 shrink-0 fill-current" />
+                {arming ? "Get ready…" : "Start Timer"}
+              </button>
+            ) : (
+              <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+                <button
+                  type="button"
+                  onClick={() => stopAndLogSession()}
+                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-500 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/30 active:scale-[0.99]"
+                >
+                  Stop &amp; log
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (
+                      confirm(
+                        "Discard this session? Nothing will be saved.",
+                      )
+                    ) {
+                      discardSession();
+                    }
+                  }}
+                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-950/50 py-3.5 text-sm font-medium text-slate-300 active:bg-slate-800"
+                >
+                  <RotateCcw className="h-4 w-4 shrink-0" />
+                  Discard
+                </button>
+              </div>
+            )}
 
             <div className="mt-6 border-t border-blue-500/15 pt-4">
               {!addingProject ? (
