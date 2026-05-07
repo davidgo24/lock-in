@@ -1,0 +1,15 @@
+import { NextResponse } from "next/server";
+import { getRecentWorkEntries } from "@/lib/work-entries";
+
+export async function GET() {
+  const rows = await getRecentWorkEntries();
+  const entries = rows.map((e) => ({
+    id: e.id,
+    summary: e.summary,
+    durationSec: e.durationSec,
+    createdAt: e.createdAt.toISOString(),
+    workDate: e.workDate.toISOString().slice(0, 10),
+    project: e.project,
+  }));
+  return NextResponse.json({ entries });
+}

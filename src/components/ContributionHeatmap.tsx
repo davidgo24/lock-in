@@ -6,12 +6,13 @@ type Props = {
   heatmap: Record<string, number>;
 };
 
+/** Dark-theme friendly: low activity must stay visible (not blue-950 on slate). */
 const levels = [
-  "bg-slate-800",
-  "bg-blue-950",
-  "bg-blue-800",
+  "bg-slate-700",
+  "bg-blue-600/85",
   "bg-blue-500",
   "bg-sky-400",
+  "bg-cyan-300",
 ];
 
 function minuteLevel(minutes: number): number {
@@ -30,7 +31,15 @@ function localYmd(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-type Cell = { key: string; minutes: number; level: number } | null;
+function formatCellTitle(key: string, sec: number): string {
+  const h = sec / 3600;
+  const m = Math.round(sec / 60);
+  if (h >= 1) return `${key}: ${h.toFixed(2)}h`;
+  if (m >= 1) return `${key}: ${m}m`;
+  return `${key}: ${sec}s`;
+}
+
+type Cell = { key: string; minutes: number; level: number; sec: number } | null;
 
 export function ContributionHeatmap({ heatmap }: Props) {
   const { weeks, monthLabels } = useMemo(() => {
@@ -56,7 +65,7 @@ export function ContributionHeatmap({ heatmap }: Props) {
       if (cur < first) {
         week.push(null);
       } else {
-        week.push({ key, minutes, level: minuteLevel(minutes) });
+        week.push({ key, minutes, level: minuteLevel(minutes), sec });
       }
 
       if (cur.getDay() === 6) {
@@ -126,9 +135,7 @@ export function ContributionHeatmap({ heatmap }: Props) {
                     <div
                       key={`${colIdx}-${rowIdx}`}
                       title={
-                        cell
-                          ? `${cell.key}: ${cell.minutes.toFixed(1)}h`
-                          : "No activity"
+                        cell ? formatCellTitle(cell.key, cell.sec) : "No activity"
                       }
                       className={`h-[12px] w-full rounded-[2px] sm:h-3 ${
                         cell ? levels[cell.level] : "bg-slate-900/80"

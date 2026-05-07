@@ -18,6 +18,10 @@ import {
 } from "lucide-react";
 import { ContributionHeatmap } from "@/components/ContributionHeatmap";
 import {
+  WorkEntriesFeed,
+  type WorkEntryRow,
+} from "@/components/WorkEntriesFeed";
+import {
   playStartCountdown,
   playTimerCompleteRing,
 } from "@/lib/sounds";
@@ -59,9 +63,20 @@ function defaultSelectedId(projects: Project[]) {
 type ActivityAppProps = {
   initialProjects: Project[];
   initialStats: StatsBundle;
+  initialWorkEntries: WorkEntryRow[];
 };
 
-export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps) {
+const DISPLAY_NAME =
+  typeof process.env.NEXT_PUBLIC_DISPLAY_NAME === "string" &&
+  process.env.NEXT_PUBLIC_DISPLAY_NAME.trim() !== ""
+    ? process.env.NEXT_PUBLIC_DISPLAY_NAME.trim()
+    : "You";
+
+export function ActivityApp({
+  initialProjects,
+  initialStats,
+  initialWorkEntries,
+}: ActivityAppProps) {
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [stats, setStats] = useState<StatsBundle>(initialStats);
   const [selectedId, setSelectedId] = useState(() =>
@@ -93,14 +108,18 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   } | null>(null);
 
   const remainingRef = useRef(remaining);
+  const [workEntries, setWorkEntries] =
+    useState<WorkEntryRow[]>(initialWorkEntries);
 
   const loadAll = useCallback(async () => {
-    const [pRes, sRes] = await Promise.all([
+    const [pRes, sRes, eRes] = await Promise.all([
       fetch("/api/projects"),
       fetch("/api/stats"),
+      fetch("/api/entries"),
     ]);
     const pJson = await pRes.json();
     const sJson = await sRes.json();
+    const eJson = await eRes.json();
     setProjects(pJson.projects ?? []);
 
     setStats({
@@ -111,6 +130,31 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
       weeklyLoggedMinutes: sJson.weeklyLoggedMinutes ?? 0,
       weeklyGoalHours: sJson.weeklyGoalHours ?? 7,
     });
+
+    const rawEntries = (eJson.entries ?? []) as Array<{
+      id: string;
+      summary: string;
+      durationSec: number;
+      createdAt: string;
+      workDate: string;
+      project: { name: string; isMisc: boolean };
+    }>;
+    setWorkEntries(
+      rawEntries.map((e) => ({
+        id: e.id,
+        summary: e.summary,
+        durationSec: e.durationSec,
+        createdAt:
+          typeof e.createdAt === "string"
+            ? e.createdAt
+            : new Date(e.createdAt).toISOString(),
+        workDate:
+          typeof e.workDate === "string"
+            ? e.workDate.slice(0, 10)
+            : new Date(e.workDate).toISOString().slice(0, 10),
+        project: e.project,
+      })),
+    );
 
     setSelectedId((prev) => {
       if (prev && (pJson.projects ?? []).some((x: Project) => x.id === prev)) {
@@ -305,7 +349,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   const weeklyPct = stats
     ? Math.min(
         100,
-        Math.round(
+        Math.ceil(
           (stats.weeklyLoggedMinutes / (stats.weeklyGoalHours * 60)) * 100,
         ),
       )
@@ -676,6 +720,10 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
               Goal: {stats?.weeklyGoalHours ?? 7}h
             </p>
           </div>
+        </section>
+
+        <section className="lg:col-span-12">
+          <WorkEntriesFeed entries={workEntries} displayName={DISPLAY_NAME} />
         </section>
       </div>
     </div>
