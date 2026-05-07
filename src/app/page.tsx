@@ -18,7 +18,7 @@ export default async function Home() {
   const initialStats = await getStatsBundle();
 
   return (
-    <div className="min-h-screen bg-zinc-50">
+    <div className="min-h-dvh bg-gradient-to-b from-slate-950 via-[#0a0f1a] to-slate-950">
       <ActivityApp
         initialProjects={initialProjects}
         initialStats={initialStats}

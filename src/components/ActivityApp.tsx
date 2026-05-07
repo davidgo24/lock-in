@@ -16,7 +16,10 @@ import {
   Trophy,
 } from "lucide-react";
 import { ContributionHeatmap } from "@/components/ContributionHeatmap";
-import { playWarmCompleteChime, startWarmNoise } from "@/lib/sounds";
+import {
+  playStartCountdown,
+  playTimerCompleteRing,
+} from "@/lib/sounds";
 import type { StatsBundle } from "@/lib/stats";
 
 type Project = { id: string; name: string; isMisc: boolean };
@@ -68,8 +71,8 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   const [addingProject, setAddingProject] = useState(false);
   const [goalEdit, setGoalEdit] = useState(false);
   const [goalDraft, setGoalDraft] = useState("7");
+  const [arming, setArming] = useState(false);
 
-  const noiseStop = useRef<(() => void) | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const durationSecRef = useRef(durationSec);
   const selectedIdRef = useRef(selectedId);
@@ -108,7 +111,6 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
-      noiseStop.current?.();
     };
   }, []);
 
@@ -128,15 +130,13 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
         if (r <= 1) {
           if (timerRef.current) clearInterval(timerRef.current);
           timerRef.current = null;
-          noiseStop.current?.();
-          noiseStop.current = null;
           setRunning(false);
           const pid = selectedIdRef.current;
           const dur = durationSecRef.current;
           completedMeta.current = { projectId: pid, durationSec: dur };
           setSaveProjectId(pid);
           setShowSave(true);
-          void playWarmCompleteChime();
+          void playTimerCompleteRing();
           return 0;
         }
         return r - 1;
@@ -148,7 +148,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   }, [running]);
 
   function applyPreset(idx: number) {
-    if (running) return;
+    if (running || arming) return;
     setPresetIdx(idx);
     const sec = PRESETS[idx].seconds;
     setDurationSec(sec);
@@ -156,15 +156,22 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   }
 
   async function startTimer() {
-    if (!selectedId || running || showSave) return;
+    if (!selectedId || running || showSave || arming) return;
+    setArming(true);
     try {
-      await new AudioContext().resume();
-    } catch {
-      /* ignore */
+      try {
+        const c = new AudioContext();
+        await c.resume();
+        await c.close();
+      } catch {
+        /* ignore */
+      }
+      await playStartCountdown();
+      setRemaining(durationSec);
+      setRunning(true);
+    } finally {
+      setArming(false);
     }
-    noiseStop.current = startWarmNoise();
-    setRemaining(durationSec);
-    setRunning(true);
   }
 
   async function saveSession() {
@@ -249,13 +256,14 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
 
   if (showSave && !saveProject) {
     return (
-      <div className="mx-auto flex min-h-full max-w-xl flex-col px-4 py-10">
-        <p className="text-sm text-zinc-600">
-          This project is no longer available. Discard and return to the dashboard.
+      <div className="mx-auto flex min-h-dvh max-w-xl flex-col px-4 py-8 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <p className="text-sm text-slate-400">
+          This project is no longer available. Discard and return to the
+          dashboard.
         </p>
         <button
           type="button"
-          className="mt-4 rounded-xl bg-zinc-900 px-4 py-2 text-sm font-medium text-white"
+          className="mt-4 min-h-11 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white active:scale-[0.99]"
           onClick={() => {
             setShowSave(false);
             setSaveProjectId(null);
@@ -271,38 +279,38 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
 
   if (showSave && saveProject) {
     return (
-      <div className="mx-auto flex min-h-full max-w-xl flex-col px-4 py-10">
-        <header className="mb-8">
-          <div className="flex items-start justify-between gap-4">
+      <div className="mx-auto flex min-h-dvh max-w-xl flex-col px-4 py-6 sm:py-10 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
+        <header className="mb-6 sm:mb-8">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+              <h1 className="text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">
                 My Activity
               </h1>
-              <p className="mt-1 text-zinc-500">
+              <p className="mt-1 text-sm text-slate-400 sm:text-base">
                 Track progress and see your activity
               </p>
             </div>
             <button
               type="button"
               onClick={() => void logout()}
-              className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+              className="min-h-11 shrink-0 rounded-lg border border-blue-500/25 bg-slate-900/50 px-3 py-2.5 text-sm text-slate-300 active:bg-slate-800"
             >
               Sign out
             </button>
           </div>
         </header>
 
-        <div className="rounded-2xl border border-zinc-200 bg-white p-8 shadow-sm">
-          <h2 className="text-center text-lg font-medium text-zinc-900">
+        <div className="rounded-2xl border border-blue-500/25 bg-slate-900/80 p-6 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-8">
+          <h2 className="text-center text-base font-medium text-slate-100 sm:text-lg">
             Session Completed for{" "}
-            <span className="font-semibold">{saveProject.name}</span>
+            <span className="font-semibold text-blue-300">{saveProject.name}</span>
           </h2>
 
-          <label className="mt-8 block text-sm font-semibold text-zinc-900">
+          <label className="mt-6 block text-sm font-semibold text-slate-200 sm:mt-8">
             What did you accomplish?
           </label>
           <textarea
-            className="mt-2 w-full min-h-[140px] rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none ring-blue-500/30 placeholder:text-zinc-400 focus:ring-4"
+            className="mt-2 min-h-[140px] w-full rounded-xl border border-blue-500/25 bg-slate-950/80 px-3 py-3 text-base text-slate-100 outline-none ring-blue-400/30 placeholder:text-slate-500 focus:ring-2"
             placeholder="Describe your progress..."
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
@@ -312,7 +320,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
             type="button"
             disabled={saving || summary.trim().length < 1}
             onClick={() => void saveSession()}
-            className="mt-6 w-full rounded-xl bg-[#A5B4FC] py-3 text-sm font-medium text-white shadow-sm transition hover:bg-[#8da3f7] disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-6 min-h-11 w-full rounded-xl bg-blue-400 py-3 text-sm font-medium text-slate-950 shadow-lg shadow-blue-500/20 transition hover:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-50"
           >
             {saving ? "Saving…" : "Save Session"}
           </button>
@@ -322,52 +330,52 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
   }
 
   return (
-    <div className="mx-auto min-h-full max-w-6xl px-4 py-8">
-      <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
+    <div className="mx-auto min-h-dvh max-w-6xl px-4 py-6 sm:py-8 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">
             My Activity
           </h1>
-          <p className="mt-1 text-zinc-500">
+          <p className="mt-1 text-sm text-slate-400 sm:text-base">
             Track progress and see your activity
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-3 rounded-full border border-zinc-200 bg-white px-4 py-2 text-sm shadow-sm">
-            <span className="flex items-center gap-1 text-zinc-700">
-              <Flame className="h-4 w-4 text-orange-500" />
+        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-3 rounded-full border border-blue-500/25 bg-slate-900/70 px-4 py-2 text-sm text-slate-200 backdrop-blur-sm">
+            <span className="flex items-center gap-1.5">
+              <Flame className="h-4 w-4 shrink-0 text-orange-400" />
               {stats?.streak ?? 0}
             </span>
-            <span className="h-4 w-px bg-zinc-200" />
-            <span className="flex items-center gap-1 text-zinc-700">
-              <Trophy className="h-4 w-4 text-amber-500" />
+            <span className="h-4 w-px bg-blue-500/30" />
+            <span className="flex items-center gap-1.5">
+              <Trophy className="h-4 w-4 shrink-0 text-amber-400" />
               {stats?.sessionCount ?? 0}
             </span>
           </div>
           <button
             type="button"
             onClick={() => void logout()}
-            className="inline-flex items-center gap-2 rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-600 hover:bg-zinc-50"
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-blue-500/25 bg-slate-900/50 px-3 py-2.5 text-sm text-slate-300 active:bg-slate-800"
           >
-            <LogOut className="h-4 w-4" />
+            <LogOut className="h-4 w-4 shrink-0" />
             Sign out
           </button>
         </div>
       </header>
 
-      <div className="grid gap-6 lg:grid-cols-12">
+      <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
         <section className="lg:col-span-4">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
+          <div className="rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
             <div className="flex flex-col items-center">
-              <div className="relative h-36 w-36">
+              <div className="relative h-36 w-36 max-w-[min(100%,9rem)]">
                 <svg className="-rotate-90" viewBox="0 0 100 100">
                   <circle
                     cx="50"
                     cy="50"
                     r="44"
                     fill="none"
-                    className="stroke-zinc-100"
+                    className="stroke-slate-800"
                     strokeWidth="10"
                   />
                   <circle
@@ -375,7 +383,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
                     cy="50"
                     r="44"
                     fill="none"
-                    className="stroke-blue-600 transition-[stroke-dashoffset] duration-500"
+                    className="stroke-blue-500 transition-[stroke-dashoffset] duration-500"
                     strokeWidth="10"
                     strokeLinecap="round"
                     strokeDasharray={`${circ} ${circ}`}
@@ -383,22 +391,22 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
                   />
                 </svg>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <div className="text-2xl font-semibold tabular-nums text-zinc-900">
-                    {formatClock(remaining)}
+                  <div className="text-2xl font-semibold tabular-nums text-slate-100 sm:text-3xl">
+                    {arming ? "…" : formatClock(remaining)}
                   </div>
-                  <Clock className="mt-1 h-4 w-4 text-zinc-400" />
+                  <Clock className="mt-1 h-4 w-4 text-slate-500" />
                 </div>
               </div>
             </div>
 
             <div className="mt-6">
-              <label className="text-xs font-medium uppercase tracking-wide text-zinc-500">
+              <label className="text-xs font-medium uppercase tracking-wide text-slate-400">
                 Project
               </label>
               <select
-                className="mt-1 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-sm text-zinc-900 outline-none ring-blue-500/30 focus:ring-4 disabled:opacity-60"
+                className="mt-1 min-h-11 w-full appearance-none rounded-xl border border-blue-500/25 bg-slate-950/80 px-3 py-2.5 text-base text-slate-100 outline-none ring-blue-400/30 focus:ring-2 disabled:opacity-60"
                 value={selectedId}
-                disabled={running}
+                disabled={running || arming}
                 onChange={(e) => setSelectedId(e.target.value)}
               >
                 {projects.map((p) => (
@@ -414,12 +422,12 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
                 <button
                   key={p.label}
                   type="button"
-                  disabled={running}
+                  disabled={running || arming}
                   onClick={() => applyPreset(i)}
-                  className={`flex-1 rounded-xl border px-2 py-2 text-sm font-medium transition ${
+                  className={`min-h-11 flex-1 rounded-xl border px-2 py-2.5 text-sm font-medium transition active:scale-[0.98] ${
                     presetIdx === i
-                      ? "border-blue-600 bg-blue-600 text-white"
-                      : "border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50"
+                      ? "border-blue-400 bg-blue-500 text-white shadow-md shadow-blue-500/25"
+                      : "border-blue-500/20 bg-slate-950/50 text-slate-200 active:bg-slate-800"
                   } disabled:opacity-50`}
                 >
                   {p.label}
@@ -429,29 +437,29 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
 
             <button
               type="button"
-              disabled={!selectedId || running}
+              disabled={!selectedId || running || arming}
               onClick={() => void startTimer()}
-              className="mt-5 flex w-full items-center justify-center gap-2 rounded-xl bg-blue-600 py-3 text-sm font-medium text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50"
+              className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-500 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/30 transition hover:bg-blue-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
             >
-              <Play className="h-4 w-4 fill-current" />
-              Start Timer
+              <Play className="h-4 w-4 shrink-0 fill-current" />
+              {arming ? "Get ready…" : "Start Timer"}
             </button>
 
-            <div className="mt-6 border-t border-zinc-100 pt-4">
+            <div className="mt-6 border-t border-blue-500/15 pt-4">
               {!addingProject ? (
                 <button
                   type="button"
-                  disabled={running}
+                  disabled={running || arming}
                   onClick={() => setAddingProject(true)}
-                  className="inline-flex items-center gap-2 text-sm font-medium text-blue-600 hover:text-blue-700 disabled:opacity-50"
+                  className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-blue-400 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
                   New project
                 </button>
               ) : (
-                <div className="flex gap-2">
+                <div className="flex flex-col gap-2 sm:flex-row">
                   <input
-                    className="flex-1 rounded-xl border border-zinc-200 px-3 py-2 text-sm outline-none ring-blue-500/30 focus:ring-4"
+                    className="min-h-11 flex-1 rounded-xl border border-blue-500/25 bg-slate-950/80 px-3 py-2.5 text-base text-slate-100 outline-none ring-blue-400/30 focus:ring-2"
                     placeholder="Project name"
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
@@ -459,7 +467,7 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
                   <button
                     type="button"
                     onClick={() => void addProject()}
-                    className="rounded-xl bg-zinc-900 px-3 py-2 text-sm font-medium text-white"
+                    className="min-h-11 shrink-0 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white"
                   >
                     Add
                   </button>
@@ -472,15 +480,15 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
                   .map((p) => (
                     <li
                       key={p.id}
-                      className="flex items-center justify-between rounded-lg border border-zinc-100 px-3 py-2 text-sm"
+                      className="flex min-h-11 items-center justify-between gap-2 rounded-lg border border-blue-500/15 bg-slate-950/40 px-3 py-2 text-sm"
                     >
-                      <span className="truncate text-zinc-800">{p.name}</span>
+                      <span className="truncate text-slate-200">{p.name}</span>
                       <button
                         type="button"
-                        disabled={running}
+                        disabled={running || arming}
                         title="Delete project"
                         onClick={() => void deleteProject(p.id)}
-                        className="text-zinc-400 hover:text-red-600 disabled:opacity-40"
+                        className="flex shrink-0 touch-manipulation p-2 text-slate-500 hover:text-red-400 disabled:opacity-40"
                       >
                         <Trash2 className="h-4 w-4" />
                       </button>
@@ -491,24 +499,24 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
           </div>
         </section>
 
-        <section className="space-y-6 lg:col-span-8">
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
-              <h2 className="text-lg font-semibold text-zinc-900">
+        <section className="space-y-5 lg:col-span-8 lg:space-y-6">
+          <div className="rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
+            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <h2 className="text-lg font-semibold text-slate-100">
                 Activity Overview
               </h2>
-              <span className="text-sm text-zinc-500">{totalLabel}</span>
+              <span className="text-sm text-slate-400">{totalLabel}</span>
             </div>
             <ContributionHeatmap heatmap={stats.heatmap} />
           </div>
 
-          <div className="rounded-2xl border border-zinc-200 bg-white p-6 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-zinc-900">
+                <h2 className="text-lg font-semibold text-slate-100">
                   Weekly Goal Progress
                 </h2>
-                <p className="mt-1 text-sm text-zinc-500">
+                <p className="mt-1 text-sm text-slate-400">
                   {weeklyPct}% Complete
                 </p>
               </div>
@@ -521,23 +529,23 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
                     );
                     setGoalEdit(true);
                   }}
-                  className="rounded-lg border border-zinc-200 px-3 py-2 text-sm text-zinc-700 hover:bg-zinc-50"
+                  className="min-h-11 shrink-0 rounded-lg border border-blue-500/25 bg-slate-950/50 px-3 py-2.5 text-sm text-slate-200 active:bg-slate-800"
                 >
                   Update Goal
                 </button>
               ) : (
-                <div className="flex items-center gap-2">
+                <div className="flex flex-wrap items-center gap-2">
                   <input
                     type="number"
                     min={0.5}
                     step={0.5}
-                    className="w-24 rounded-lg border border-zinc-200 px-2 py-1 text-sm"
+                    className="min-h-11 w-24 rounded-lg border border-blue-500/25 bg-slate-950/80 px-2 py-2 text-base text-slate-100"
                     value={goalDraft}
                     onChange={(e) => setGoalDraft(e.target.value)}
                   />
                   <button
                     type="button"
-                    className="rounded-lg bg-blue-600 px-3 py-2 text-sm font-medium text-white"
+                    className="min-h-11 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white"
                     onClick={async () => {
                       const v = Number(goalDraft);
                       await fetch("/api/settings", {
@@ -555,13 +563,13 @@ export function ActivityApp({ initialProjects, initialStats }: ActivityAppProps)
               )}
             </div>
 
-            <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-blue-100">
+            <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-blue-950/80">
               <div
-                className="h-full rounded-full bg-blue-600 transition-[width] duration-500"
+                className="h-full rounded-full bg-gradient-to-r from-blue-600 to-sky-400 transition-[width] duration-500"
                 style={{ width: `${weeklyPct}%` }}
               />
             </div>
-            <p className="mt-3 text-right text-xs text-zinc-500">
+            <p className="mt-3 text-right text-xs text-slate-500">
               Goal: {stats?.weeklyGoalHours ?? 7}h
             </p>
           </div>

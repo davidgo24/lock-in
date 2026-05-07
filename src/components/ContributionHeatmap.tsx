@@ -7,11 +7,11 @@ type Props = {
 };
 
 const levels = [
-  "bg-zinc-100",
-  "bg-blue-100",
-  "bg-blue-300",
+  "bg-slate-800",
+  "bg-blue-950",
+  "bg-blue-800",
   "bg-blue-500",
-  "bg-blue-700",
+  "bg-sky-400",
 ];
 
 function minuteLevel(minutes: number): number {
@@ -89,10 +89,10 @@ export function ContributionHeatmap({ heatmap }: Props) {
   }, [heatmap]);
 
   return (
-    <div className="w-full overflow-x-auto pb-1">
+    <div className="w-full overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch]">
       <div className="relative min-w-[720px]">
         <div
-          className="mb-1 grid text-[11px] text-zinc-400"
+          className="mb-1 grid text-[11px] text-slate-500"
           style={{
             gridTemplateColumns: `28px repeat(${weeks.length}, minmax(0, 1fr))`,
           }}
@@ -117,7 +117,7 @@ export function ContributionHeatmap({ heatmap }: Props) {
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
             (day, rowIdx) => (
               <div key={day} className="contents">
-                <div className="flex h-[12px] items-center pr-1 text-[11px] text-zinc-400">
+                <div className="flex h-[12px] items-center pr-1 text-[11px] text-slate-500 sm:h-3">
                   {rowIdx % 2 === 1 ? "" : day}
                 </div>
                 {weeks.map((week, colIdx) => {
@@ -130,8 +130,8 @@ export function ContributionHeatmap({ heatmap }: Props) {
                           ? `${cell.key}: ${cell.minutes.toFixed(1)}h`
                           : "No activity"
                       }
-                      className={`h-[12px] w-full rounded-[2px] ${
-                        cell ? levels[cell.level] : "bg-zinc-50"
+                      className={`h-[12px] w-full rounded-[2px] sm:h-3 ${
+                        cell ? levels[cell.level] : "bg-slate-900/80"
                       }`}
                     />
                   );
@@ -141,7 +141,7 @@ export function ContributionHeatmap({ heatmap }: Props) {
           )}
         </div>
 
-        <div className="mt-3 flex items-center justify-end gap-2 text-[11px] text-zinc-500">
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500">
           <span>Less</span>
           <div className="flex gap-1">
             {levels.map((c) => (
