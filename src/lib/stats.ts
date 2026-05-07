@@ -8,13 +8,37 @@ export function localYmd(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
+/** Calendar day the user “joined”: first activity day, else first project created (local calendar). */
+export async function getHeatmapRangeStartKey(): Promise<string> {
+  const [earliestSession, earliestProject] = await Promise.all([
+    prisma.activitySession.findFirst({
+      orderBy: { workDate: "asc" },
+      select: { workDate: true },
+    }),
+    prisma.project.findFirst({
+      orderBy: { createdAt: "asc" },
+      select: { createdAt: true },
+    }),
+  ]);
+
+  if (earliestSession) {
+    return earliestSession.workDate.toISOString().slice(0, 10);
+  }
+  if (earliestProject) {
+    const d = earliestProject.createdAt;
+    return localYmd(d);
+  }
+  return localYmd(new Date());
+}
+
 export async function getStatsBundle() {
   const endD = new Date();
-  const startD = new Date(endD);
-  startD.setDate(startD.getDate() - 364);
-
-  const startKey = localYmd(startD);
   const endKey = localYmd(endD);
+
+  let startKey = await getHeatmapRangeStartKey();
+  if (startKey > endKey) {
+    startKey = endKey;
+  }
 
   const gte = new Date(`${startKey}T00:00:00.000Z`);
   const lte = new Date(`${endKey}T00:00:00.000Z`);
@@ -73,6 +97,7 @@ export async function getStatsBundle() {
 
   return {
     heatmap,
+    heatmapRangeStart: startKey,
     totalMinutesYear: Math.round(totalSecYear / 60),
     streak,
     sessionCount,

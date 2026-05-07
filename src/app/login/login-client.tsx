@@ -33,7 +33,7 @@ export function LoginClient() {
   }
 
   return (
-    <div className="flex min-h-dvh flex-col items-center justify-center bg-gradient-to-b from-slate-950 via-[#0a0f1a] to-slate-950 px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+    <div className="flex min-h-dvh w-full max-w-[100vw] flex-col items-center justify-center overflow-x-clip bg-gradient-to-b from-slate-950 via-[#0a0f1a] to-slate-950 px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="w-full max-w-sm rounded-2xl border border-blue-500/25 bg-slate-900/90 p-8 shadow-lg shadow-blue-500/5 backdrop-blur-sm">
         <h1 className="text-xl font-semibold text-slate-100">Sign in</h1>
         <p className="mt-1 text-sm text-slate-400">

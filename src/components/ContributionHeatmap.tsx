@@ -4,6 +4,8 @@ import { useMemo } from "react";
 
 type Props = {
   heatmap: Record<string, number>;
+  /** First calendar day to show (YYYY-MM-DD), usually platform join / first activity. */
+  rangeStartKey: string;
 };
 
 /** Dark-theme friendly: low activity must stay visible (not blue-950 on slate). */
@@ -41,13 +43,24 @@ function formatCellTitle(key: string, sec: number): string {
 
 type Cell = { key: string; minutes: number; level: number; sec: number } | null;
 
-export function ContributionHeatmap({ heatmap }: Props) {
+function parseLocalYmd(key: string): Date {
+  const [y, m, d] = key.split("-").map(Number);
+  if (!y || !m || !d) return new Date();
+  return new Date(y, m - 1, d);
+}
+
+export function ContributionHeatmap({ heatmap, rangeStartKey }: Props) {
   const { weeks, monthLabels } = useMemo(() => {
     const end = new Date();
     end.setHours(0, 0, 0, 0);
     const last = new Date(end.getFullYear(), end.getMonth(), end.getDate());
-    const first = new Date(last);
-    first.setDate(first.getDate() - 364);
+
+    const first = parseLocalYmd(rangeStartKey);
+    first.setHours(0, 0, 0, 0);
+
+    if (first > last) {
+      first.setTime(last.getTime());
+    }
 
     const gridStart = new Date(first);
     while (gridStart.getDay() !== 0) {
@@ -95,22 +108,22 @@ export function ContributionHeatmap({ heatmap }: Props) {
     });
 
     return { weeks, monthLabels };
-  }, [heatmap]);
+  }, [heatmap, rangeStartKey]);
 
   return (
-    <div className="w-full overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch]">
-      <div className="relative min-w-[720px]">
+    <div className="w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch]">
+      <div className="relative w-full min-w-0 max-w-full">
         <div
-          className="mb-1 grid text-[11px] text-slate-500"
+          className="mb-1 grid text-[10px] text-slate-500 sm:text-[11px]"
           style={{
-            gridTemplateColumns: `28px repeat(${weeks.length}, minmax(0, 1fr))`,
+            gridTemplateColumns: `1.25rem repeat(${weeks.length}, minmax(0, 1fr))`,
           }}
         >
           <div />
           {weeks.map((_, i) => {
             const label = monthLabels.find((m) => m.col === i)?.label ?? "";
             return (
-              <div key={i} className="px-0.5 text-left">
+              <div key={i} className="min-w-0 truncate px-px text-left sm:px-0.5">
                 {label}
               </div>
             );
@@ -118,16 +131,16 @@ export function ContributionHeatmap({ heatmap }: Props) {
         </div>
 
         <div
-          className="grid items-start gap-x-[3px]"
+          className="grid items-start gap-x-[2px] sm:gap-x-[3px]"
           style={{
-            gridTemplateColumns: `28px repeat(${weeks.length}, minmax(0, 1fr))`,
+            gridTemplateColumns: `1.25rem repeat(${weeks.length}, minmax(0, 1fr))`,
           }}
         >
           {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
             (day, rowIdx) => (
               <div key={day} className="contents">
-                <div className="flex h-[12px] items-center pr-1 text-[11px] text-slate-500 sm:h-3">
-                  {rowIdx % 2 === 1 ? "" : day}
+                <div className="flex h-2.5 items-center pr-0.5 text-[9px] leading-none text-slate-500 sm:h-3 sm:text-[11px]">
+                  {rowIdx % 2 === 1 ? "" : day.slice(0, 1)}
                 </div>
                 {weeks.map((week, colIdx) => {
                   const cell = week[rowIdx];
@@ -137,7 +150,7 @@ export function ContributionHeatmap({ heatmap }: Props) {
                       title={
                         cell ? formatCellTitle(cell.key, cell.sec) : "No activity"
                       }
-                      className={`h-[12px] w-full rounded-[2px] sm:h-3 ${
+                      className={`h-2.5 w-full min-w-0 rounded-[1px] sm:h-3 sm:rounded-[2px] ${
                         cell ? levels[cell.level] : "bg-slate-900/80"
                       }`}
                     />
@@ -148,11 +161,14 @@ export function ContributionHeatmap({ heatmap }: Props) {
           )}
         </div>
 
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[11px] text-slate-500">
+        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[10px] text-slate-500 sm:text-[11px]">
           <span>Less</span>
-          <div className="flex gap-1">
+          <div className="flex gap-0.5 sm:gap-1">
             {levels.map((c) => (
-              <div key={c} className={`h-[12px] w-[12px] rounded-[2px] ${c}`} />
+              <div
+                key={c}
+                className={`h-2 w-2 rounded-[1px] sm:h-3 sm:w-3 sm:rounded-[2px] ${c}`}
+              />
             ))}
           </div>
           <span>More</span>

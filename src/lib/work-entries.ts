@@ -1,16 +1,23 @@
+import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 
-export async function getRecentWorkEntries() {
+const workEntrySelect = {
+  id: true,
+  summary: true,
+  durationSec: true,
+  createdAt: true,
+  workDate: true,
+  project: { select: { name: true, isMisc: true } },
+} as const satisfies Prisma.ActivitySessionSelect;
+
+export type RecentWorkEntryRow = Prisma.ActivitySessionGetPayload<{
+  select: typeof workEntrySelect;
+}>;
+
+export async function getRecentWorkEntries(): Promise<RecentWorkEntryRow[]> {
   return prisma.activitySession.findMany({
     take: 50,
     orderBy: { createdAt: "desc" },
-    select: {
-      id: true,
-      summary: true,
-      durationSec: true,
-      createdAt: true,
-      workDate: true,
-      project: { select: { name: true, isMisc: true } },
-    },
+    select: workEntrySelect,
   });
 }

@@ -124,6 +124,7 @@ export function ActivityApp({
 
     setStats({
       heatmap: sJson.heatmap ?? {},
+      heatmapRangeStart: sJson.heatmapRangeStart ?? localYmdFromDate(new Date()),
       totalMinutesYear: sJson.totalMinutesYear ?? 0,
       streak: sJson.streak ?? 0,
       sessionCount: sJson.sessionCount ?? 0,
@@ -444,7 +445,7 @@ export function ActivityApp({
   }
 
   return (
-    <div className="mx-auto min-h-dvh max-w-6xl px-4 py-6 sm:py-8 pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <div className="mx-auto box-border min-h-dvh w-full min-w-0 max-w-6xl px-3 py-6 sm:px-4 sm:py-8 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">
@@ -478,11 +479,11 @@ export function ActivityApp({
         </div>
       </header>
 
-      <div className="grid gap-5 lg:grid-cols-12 lg:gap-6">
-        <section className="lg:col-span-4">
-          <div className="rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
+      <div className="grid min-w-0 gap-5 lg:grid-cols-12 lg:gap-6">
+        <section className="min-w-0 lg:col-span-4">
+          <div className="min-w-0 rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
             <div className="flex flex-col items-center">
-              <div className="relative h-36 w-36 max-w-[min(100%,9rem)]">
+              <div className="relative h-36 w-36 max-w-[min(100%,9rem)] shrink-0">
                 <svg className="-rotate-90" viewBox="0 0 100 100">
                   <circle
                     cx="50"
@@ -504,17 +505,17 @@ export function ActivityApp({
                     strokeDashoffset={circ * (1 - progress)}
                   />
                 </svg>
-            <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-              <div className="text-2xl font-semibold tabular-nums text-slate-100 sm:text-3xl">
-                {arming ? "…" : formatClock(remaining)}
-              </div>
-              {running ? (
-                <span className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-blue-400/90 sm:text-xs">
-                  In progress
-                </span>
-              ) : null}
-              <Clock className="mt-1 h-4 w-4 text-slate-500" />
-            </div>
+                <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
+                  <div className="text-2xl font-semibold tabular-nums text-slate-100 sm:text-3xl">
+                    {arming ? "…" : formatClock(remaining)}
+                  </div>
+                  {running ? (
+                    <span className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-blue-400/90 sm:text-xs">
+                      In progress
+                    </span>
+                  ) : null}
+                  <Clock className="mt-1 h-4 w-4 text-slate-500" />
+                </div>
               </div>
             </div>
 
@@ -646,15 +647,18 @@ export function ActivityApp({
           </div>
         </section>
 
-        <section className="space-y-5 lg:col-span-8 lg:space-y-6">
-          <div className="rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
+        <section className="min-w-0 space-y-5 lg:col-span-8 lg:space-y-6">
+          <div className="min-w-0 overflow-hidden rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
             <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <h2 className="text-lg font-semibold text-slate-100">
                 Activity Overview
               </h2>
               <span className="text-sm text-slate-400">{totalLabel}</span>
             </div>
-            <ContributionHeatmap heatmap={stats.heatmap} />
+            <ContributionHeatmap
+              heatmap={stats.heatmap}
+              rangeStartKey={stats.heatmapRangeStart}
+            />
           </div>
 
           <div className="rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
@@ -722,7 +726,7 @@ export function ActivityApp({
           </div>
         </section>
 
-        <section className="lg:col-span-12">
+        <section className="min-w-0 lg:col-span-12">
           <WorkEntriesFeed entries={workEntries} displayName={DISPLAY_NAME} />
         </section>
       </div>

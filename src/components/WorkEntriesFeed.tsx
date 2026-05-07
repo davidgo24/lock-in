@@ -79,7 +79,7 @@ export function WorkEntriesFeed({ entries, displayName }: Props) {
                       </p>
                     </div>
                   </div>
-                  <p className="mt-3 whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
+                  <p className="mt-3 break-words whitespace-pre-wrap text-sm leading-relaxed text-slate-300">
                     {e.summary}
                   </p>
                   <p className="mt-2 text-right text-xs text-slate-500">

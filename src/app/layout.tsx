@@ -34,7 +34,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en" className={`${inter.variable} h-full antialiased`}>
-      <body className="min-h-dvh flex flex-col font-sans">{children}</body>
+      <body className="min-h-dvh max-w-[100vw] flex flex-col overflow-x-clip font-sans">
+        {children}
+      </body>
     </html>
   );
 }
