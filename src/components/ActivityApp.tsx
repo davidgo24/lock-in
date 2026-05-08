@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
 } from "react";
@@ -60,6 +61,55 @@ function defaultSelectedId(projects: Project[]) {
   return misc?.id ?? projects[0]?.id ?? "";
 }
 
+const TIMER_STORAGE_KEY = "activity-tracker-timer-v1";
+
+type PersistedTimer = {
+  v: 1;
+  endsAt: number;
+  durationSec: number;
+  presetIdx: number;
+  selectedId: string;
+};
+
+function parsePersisted(raw: string | null): PersistedTimer | null {
+  if (raw == null || typeof window === "undefined") return null;
+  try {
+    const o = JSON.parse(raw) as Partial<PersistedTimer>;
+    if (o.v !== 1) return null;
+    if (typeof o.endsAt !== "number" || typeof o.durationSec !== "number")
+      return null;
+    if (typeof o.presetIdx !== "number" || typeof o.selectedId !== "string")
+      return null;
+    if (
+      !Number.isFinite(o.endsAt) ||
+      o.durationSec < 1 ||
+      o.presetIdx < 0 ||
+      o.presetIdx >= PRESETS.length
+    ) {
+      return null;
+    }
+    return o as PersistedTimer;
+  } catch {
+    return null;
+  }
+}
+
+function writeTimerStorage(p: PersistedTimer) {
+  try {
+    localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(p));
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function clearTimerStorage() {
+  try {
+    localStorage.removeItem(TIMER_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 type ActivityAppProps = {
   initialProjects: Project[];
   initialStats: StatsBundle;
@@ -108,6 +158,7 @@ export function ActivityApp({
   } | null>(null);
 
   const remainingRef = useRef(remaining);
+  const timerEndsAtRef = useRef<number | null>(null);
   const [workEntries, setWorkEntries] =
     useState<WorkEntryRow[]>(initialWorkEntries);
 
@@ -191,33 +242,106 @@ export function ActivityApp({
     }
   }
 
+  const syncFromEndTime = useCallback((playSoundOnComplete: boolean) => {
+    const end = timerEndsAtRef.current;
+    if (end == null) return;
+    const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+    if (left > 0) {
+      setRemaining(left);
+      return;
+    }
+    timerEndsAtRef.current = null;
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+    clearTimerStorage();
+    setRunning(false);
+    const pid = selectedIdRef.current;
+    const dur = durationSecRef.current;
+    completedMeta.current = { projectId: pid, durationSec: dur };
+    setSaveProjectId(pid);
+    setSessionSaveHint({
+      minutes: Math.round(dur / 60),
+      early: false,
+    });
+    setShowSave(true);
+    setRemaining(0);
+    if (playSoundOnComplete) void playTimerCompleteRing();
+  }, []);
+
+  const timerHydratedRef = useRef(false);
+  /* Timer persistence lives in localStorage; sync once after mount (client external store). */
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useLayoutEffect(() => {
+    if (timerHydratedRef.current) return;
+    timerHydratedRef.current = true;
+    const p = parsePersisted(localStorage.getItem(TIMER_STORAGE_KEY));
+    if (!p) return;
+    if (!initialProjects.some((x) => x.id === p.selectedId)) {
+      clearTimerStorage();
+      return;
+    }
+    durationSecRef.current = p.durationSec;
+    selectedIdRef.current = p.selectedId;
+    timerEndsAtRef.current = p.endsAt;
+    setDurationSec(p.durationSec);
+    setPresetIdx(p.presetIdx);
+    setSelectedId(p.selectedId);
+
+    const left = Math.max(0, Math.ceil((p.endsAt - Date.now()) / 1000));
+    if (left <= 0) {
+      timerEndsAtRef.current = null;
+      clearTimerStorage();
+      setRemaining(0);
+      setRunning(false);
+      completedMeta.current = {
+        projectId: p.selectedId,
+        durationSec: p.durationSec,
+      };
+      setSaveProjectId(p.selectedId);
+      setSessionSaveHint({
+        minutes: Math.round(p.durationSec / 60),
+        early: false,
+      });
+      setShowSave(true);
+      return;
+    }
+    setRemaining(left);
+    setRunning(true);
+  }, [initialProjects]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
   useEffect(() => {
     if (!running) return;
+    const tick = () => {
+      syncFromEndTime(true);
+    };
     clearTick();
-    timerRef.current = setInterval(() => {
-      setRemaining((r) => {
-        if (r <= 1) {
-          clearTick();
-          setRunning(false);
-          const pid = selectedIdRef.current;
-          const dur = durationSecRef.current;
-          completedMeta.current = { projectId: pid, durationSec: dur };
-          setSaveProjectId(pid);
-          setSessionSaveHint({
-            minutes: Math.round(dur / 60),
-            early: false,
-          });
-          setShowSave(true);
-          void playTimerCompleteRing();
-          return 0;
-        }
-        return r - 1;
-      });
-    }, 1000);
+    tick();
+    timerRef.current = setInterval(tick, 1000);
     return () => {
       clearTick();
     };
-  }, [running]);
+  }, [running, syncFromEndTime]);
+
+  useEffect(() => {
+    if (!running) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        syncFromEndTime(true);
+      }
+    };
+    const onFocus = () => {
+      syncFromEndTime(true);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onFocus);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [running, syncFromEndTime]);
 
   function applyPreset(idx: number) {
     if (running || arming) return;
@@ -230,6 +354,7 @@ export function ActivityApp({
   async function startTimer() {
     if (!selectedId || running || showSave || arming) return;
     setArming(true);
+    const capturedPresetIdx = presetIdx;
     try {
       try {
         const c = new AudioContext();
@@ -239,8 +364,19 @@ export function ActivityApp({
         /* ignore */
       }
       await playStartCountdown();
-      setRemaining(durationSec);
+      const dur = durationSecRef.current;
+      const sid = selectedIdRef.current;
+      const endsAt = Date.now() + dur * 1000;
+      timerEndsAtRef.current = endsAt;
+      setRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
       setRunning(true);
+      writeTimerStorage({
+        v: 1,
+        endsAt,
+        durationSec: dur,
+        presetIdx: capturedPresetIdx,
+        selectedId: sid,
+      });
     } finally {
       setArming(false);
     }
@@ -249,6 +385,8 @@ export function ActivityApp({
   function discardSession() {
     if (!running) return;
     clearTick();
+    timerEndsAtRef.current = null;
+    clearTimerStorage();
     setRunning(false);
     setRemaining(durationSecRef.current);
   }
@@ -256,16 +394,24 @@ export function ActivityApp({
   function stopAndLogSession() {
     if (!running) return;
     const total = durationSecRef.current;
-    const rem = remainingRef.current;
+    const end = timerEndsAtRef.current;
+    const rem =
+      end != null
+        ? Math.max(0, Math.ceil((end - Date.now()) / 1000))
+        : remainingRef.current;
     const rawElapsed = Math.max(0, total - rem);
     if (rawElapsed < 15) {
       clearTick();
+      timerEndsAtRef.current = null;
+      clearTimerStorage();
       setRunning(false);
       setRemaining(total);
       alert("Work a little longer before logging, or tap Discard.");
       return;
     }
     clearTick();
+    timerEndsAtRef.current = null;
+    clearTimerStorage();
     setRunning(false);
     const logged = secondsRoundedToNearestMinute(rawElapsed);
     completedMeta.current = {
@@ -336,6 +482,9 @@ export function ActivityApp({
   }
 
   async function logout() {
+    clearTick();
+    timerEndsAtRef.current = null;
+    clearTimerStorage();
     await fetch("/api/auth/logout", { method: "POST" });
     window.location.href = "/login";
   }
