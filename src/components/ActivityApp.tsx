@@ -30,6 +30,10 @@ import {
   playStartCountdown,
   playTimerCompleteRing,
 } from "@/lib/sounds";
+import {
+  notifyTimerComplete,
+  requestTimerNotifyPermissionIfNeeded,
+} from "@/lib/timer-notify";
 import { normalizeHandleInput, validateHandle } from "@/lib/handle";
 import type { FriendsStatePayload } from "@/lib/friends";
 import type { StatsBundle } from "@/lib/stats";
@@ -105,10 +109,17 @@ function localYmdFromDate(d: Date) {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-/** Raw elapsed seconds → duration to store: nearest minute, at least 1 minute. */
-function secondsRoundedToNearestMinute(raw: number): number {
-  const minutes = Math.max(1, Math.round(raw / 60));
-  return minutes * 60;
+/** Elapsed seconds when stopping early — save real time focused, at least 1 second. */
+function durationSecToStore(raw: number): number {
+  return Math.max(1, Math.round(raw));
+}
+
+function formatDurationLabel(sec: number): string {
+  if (sec < 60) return `${sec} sec`;
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (s === 0) return m === 1 ? "1 min" : `${m} min`;
+  return `${m} min ${s} sec`;
 }
 
 function defaultSelectedId(projects: Project[]) {
@@ -211,7 +222,7 @@ export function ActivityApp({
   );
   const [saveProjectId, setSaveProjectId] = useState<string | null>(null);
   const [sessionSaveHint, setSessionSaveHint] = useState<{
-    minutes: number;
+    durationSec: number;
     early: boolean;
   } | null>(null);
 
@@ -442,12 +453,13 @@ export function ActivityApp({
     completedMeta.current = { projectId: pid, durationSec: dur };
     setSaveProjectId(pid);
     setSessionSaveHint({
-      minutes: Math.round(dur / 60),
+      durationSec: dur,
       early: false,
     });
     setShowSave(true);
     setRemaining(0);
     if (playSoundOnComplete) void playTimerCompleteRing();
+    if (playSoundOnComplete) notifyTimerComplete();
   }, []);
 
   const timerHydratedRef = useRef(false);
@@ -481,7 +493,7 @@ export function ActivityApp({
       };
       setSaveProjectId(p.selectedId);
       setSessionSaveHint({
-        minutes: Math.round(p.durationSec / 60),
+        durationSec: p.durationSec,
         early: false,
       });
       setShowSave(true);
@@ -549,6 +561,7 @@ export function ActivityApp({
       } catch {
         /* ignore */
       }
+      requestTimerNotifyPermissionIfNeeded();
       await playStartCountdown();
       const dur = durationSecRef.current;
       const sid = selectedIdRef.current;
@@ -622,14 +635,14 @@ export function ActivityApp({
         ? Math.max(0, Math.ceil((end - Date.now()) / 1000))
         : remainingRef.current;
     const rawElapsed = Math.max(0, total - rem);
-    if (rawElapsed < 15) {
+    if (rawElapsed < 1) {
       clearTick();
       timerEndsAtRef.current = null;
       clearTimerStorage();
       setRunning(false);
       setRemaining(total);
       setDashNotice({
-        text: "Work a little longer before logging, or tap Discard.",
+        text: "No time on the clock yet — start the timer or tap Discard.",
         kind: "error",
       });
       return;
@@ -638,14 +651,14 @@ export function ActivityApp({
     timerEndsAtRef.current = null;
     clearTimerStorage();
     setRunning(false);
-    const logged = secondsRoundedToNearestMinute(rawElapsed);
+    const logged = durationSecToStore(rawElapsed);
     completedMeta.current = {
       projectId: selectedIdRef.current,
       durationSec: logged,
     };
     setSaveProjectId(selectedIdRef.current);
     setSessionSaveHint({
-      minutes: Math.round(logged / 60),
+      durationSec: logged,
       early: true,
     });
     setShowSave(true);
@@ -711,7 +724,7 @@ export function ActivityApp({
       }
       setPendingDeleteId(id);
       setDashNotice({
-        text: "Tap the trash icon again to permanently delete this project and its history.",
+        text: "Tap the trash icon again to permanently delete this focus area and its history.",
         kind: "info",
       });
       pendingDeleteTimerRef.current = setTimeout(() => {
@@ -728,7 +741,7 @@ export function ActivityApp({
     setDashNotice(null);
     const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
     if (!res.ok) {
-      setDashNotice({ text: "Could not delete project.", kind: "error" });
+      setDashNotice({ text: "Could not remove this focus area.", kind: "error" });
       return;
     }
     void loadAll();
@@ -865,7 +878,7 @@ export function ActivityApp({
     }
     setFriendsState(j as FriendsStatePayload);
     setFriendNotice({
-      text: "You're connected — their sessions show below.",
+      text: "You're connected — their activity shows below.",
       kind: "success",
     });
     void loadAll();
@@ -898,7 +911,7 @@ export function ActivityApp({
       }
       setPendingUnfriendId(otherUserId);
       setDashNotice({
-        text: "Tap Remove again to unfriend — you will stop seeing each other's sessions.",
+        text: "Tap Remove again to unfriend — you will stop seeing each other's activity.",
         kind: "info",
       });
       pendingUnfriendTimerRef.current = setTimeout(() => {
@@ -954,7 +967,7 @@ export function ActivityApp({
     return (
       <div className="mx-auto flex min-h-dvh max-w-xl flex-col px-4 py-8 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
         <p className="text-sm text-[var(--app-muted)]">
-          This project is no longer available. Discard and return to the
+          This focus area is no longer available. Discard and return to the
           dashboard.
         </p>
         <button
@@ -981,10 +994,11 @@ export function ActivityApp({
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
               <h1 className="font-display text-2xl tracking-tight text-[var(--foreground)] sm:text-3xl">
-                Log this sesh
+                Log this session
               </h1>
               <p className="mt-1 text-sm text-[var(--app-muted)] sm:text-base">
-                Note what you shipped — that&apos;s your proof.
+                A few words about what you did — that&apos;s your accountability
+                trail.
               </p>
             </div>
             <div className="flex shrink-0 gap-2">
@@ -1010,17 +1024,17 @@ export function ActivityApp({
           {sessionSaveHint ? (
             <p className="mt-2 text-center text-sm text-[var(--app-muted)]">
               {sessionSaveHint.early
-                ? `Logging ~${sessionSaveHint.minutes} min (rounded to the nearest minute).`
-                : `Full session: ${sessionSaveHint.minutes} min.`}
+                ? `Saving ${formatDurationLabel(sessionSaveHint.durationSec)} — the time you focused before stopping.`
+                : `Full block: ${formatDurationLabel(sessionSaveHint.durationSec)}.`}
             </p>
           ) : null}
 
           <label className="mt-6 block text-sm font-semibold text-[var(--foreground)] sm:mt-8">
-            What did you accomplish?
+            What did you work on?
           </label>
           <textarea
             className="mt-2 min-h-[140px] w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-3 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 placeholder:text-[var(--app-muted)] focus:ring-2"
-            placeholder="Quick note to future you…"
+            placeholder="Reading, coursework, clients, admin — whatever you focused on…"
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
           />
@@ -1046,7 +1060,7 @@ export function ActivityApp({
             {appName}
           </p>
           <p className="text-xs text-[var(--app-muted)]">
-            Log a sesh · see your journey
+            Focus sessions · stay accountable
           </p>
         </div>
         <div className="flex flex-shrink-0 items-center gap-2">
@@ -1098,14 +1112,14 @@ export function ActivityApp({
         <aside className="order-2 min-w-0 xl:sticky xl:top-4 xl:order-1 xl:self-start">
           <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
             <h2 className="font-display text-lg text-[var(--foreground)]">
-              Projects
+              Focus areas
             </h2>
             <p className="mt-0.5 text-xs text-[var(--app-muted)]">
-              Tap one to focus the timer
+              Classes, placements, thesis, life admin — tap one for the timer
             </p>
             <ul className="mt-4 space-y-2">
               {projects.map((p) => {
-                const label = p.isMisc ? "Misc. tasks" : p.name;
+                const label = p.isMisc ? "General" : p.name;
                 const active = p.id === selectedId;
                 return (
                   <li key={p.id}>
@@ -1151,13 +1165,13 @@ export function ActivityApp({
                   className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--app-border)] text-sm font-medium text-[var(--app-accent)] hover:bg-[var(--app-accent)]/5 disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
-                  New project
+                  Add focus area
                 </button>
               ) : (
                 <div className="flex flex-col gap-2 sm:flex-row">
                   <input
                     className="min-h-11 flex-1 rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
-                    placeholder="Project name"
+                    placeholder="e.g. Practicum, thesis, MFT coursework"
                     value={newProjectName}
                     onChange={(e) => setNewProjectName(e.target.value)}
                   />
@@ -1184,7 +1198,7 @@ export function ActivityApp({
                     <button
                       type="button"
                       disabled={running || arming}
-                      title="Delete project"
+                      title="Delete focus area"
                       onClick={() => void deleteProject(p.id)}
                       className={`shrink-0 rounded p-1.5 text-[var(--app-muted)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40 ${
                         pendingDeleteId === p.id
@@ -1203,14 +1217,14 @@ export function ActivityApp({
         <main className="order-1 flex min-w-0 flex-col gap-6 xl:order-2">
           <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-5 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-7">
             <p className="font-display text-lg text-[var(--foreground)] sm:text-xl">
-              What are you building tonight?
+              What are you focusing on?
             </p>
             {selectedProject ? (
               <p className="mt-1 text-xs text-[var(--app-muted)]">
                 On{" "}
                 <span className="font-medium text-[var(--foreground)]/80">
                   {selectedProject.isMisc
-                    ? "Misc. tasks"
+                    ? "General"
                     : selectedProject.name}
                 </span>
               </p>
@@ -1255,7 +1269,7 @@ export function ActivityApp({
 
             <div className="mt-6">
               <label className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">
-                Project
+                Focus area
               </label>
               <select
                 className="mt-1 min-h-11 w-full appearance-none rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2 disabled:opacity-60"
@@ -1265,7 +1279,7 @@ export function ActivityApp({
               >
                 {projects.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.isMisc ? "Misc. tasks" : p.name}
+                    {p.isMisc ? "General" : p.name}
                   </option>
                 ))}
               </select>
@@ -1322,6 +1336,12 @@ export function ActivityApp({
                 </button>
               </div>
             )}
+
+            <p className="mt-3 text-center text-[10px] leading-snug text-[var(--app-muted)] sm:text-[11px]">
+              On your phone: turn the volume up. When time&apos;s up you&apos;ll
+              hear a chime and feel a short vibration; if your browser asks to show
+              notifications, allowing that helps when the tab is in the background.
+            </p>
           </div>
 
           <div className="grid grid-cols-3 gap-2 sm:gap-3">
@@ -1349,7 +1369,7 @@ export function ActivityApp({
                 {stats?.activeProjectsCount ?? 1}
               </p>
               <p className="mt-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--app-muted)] sm:text-[10px]">
-                Active
+                Areas
               </p>
             </div>
           </div>
@@ -1357,7 +1377,7 @@ export function ActivityApp({
           <div className="min-w-0 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
             <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <h2 className="font-display text-lg text-[var(--foreground)]">
-                Your journey
+                Activity over time
               </h2>
               <span className="text-xs text-[var(--app-muted)]">{totalLabel}</span>
             </div>
@@ -1476,7 +1496,13 @@ export function ActivityApp({
               className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5"
               role="tabpanel"
             >
-              <WorkEntriesFeed entries={workEntries} displayName={displayName} />
+              <WorkEntriesFeed
+                entries={workEntries}
+                displayName={displayName}
+                title="Your activity"
+                subtitle="Newest entries — your accountability trail."
+                emptyMessage="Finish a focus block and log it to see entries here."
+              />
               <p className="mt-4 text-center text-xs text-[var(--app-muted)]">
                 <button
                   type="button"
@@ -1485,7 +1511,7 @@ export function ActivityApp({
                 >
                   Community
                 </button>{" "}
-                · friend requests and their sessions
+                · friend requests and shared activity
               </p>
             </div>
           ) : (
@@ -1500,7 +1526,8 @@ export function ActivityApp({
                 <p className="mt-1 text-sm text-[var(--app-muted)]">
                   Pick a unique handle, then send a request. They accept — you
                   both see each other&apos;s session logs (not one-way follows).
-                  Friends see your note and project name for each session.
+                  Friends see your note and which focus area you used for each
+                  block.
                 </p>
 
                 {friendNotice ? (
@@ -1691,12 +1718,12 @@ export function ActivityApp({
                 <WorkEntriesFeed
                   entries={friendFeed}
                   displayName=""
-                  title="Friends&apos; sessions"
-                  subtitle="Latest logs from people you&apos;re connected with."
+                  title="Friends&apos; activity"
+                  subtitle="What they logged during their focus blocks."
                   emptyMessage={
                     friendsState.friends.length === 0
-                      ? "Add a friend above to see their sessions here."
-                      : "Nothing logged yet — check back after their next sesh."
+                      ? "Add a friend above to see their activity here."
+                      : "Nothing logged yet — check back after their next session."
                   }
                 />
               </div>

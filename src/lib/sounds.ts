@@ -28,8 +28,16 @@ export async function playStartCountdown(): Promise<void> {
   await ctx.close();
 }
 
-/** Brief, soft bell when the session timer hits zero. */
+/** Stronger chime + haptics — phones often need volume up; user must start timer from a tap for audio unlock. */
 export async function playTimerCompleteRing(): Promise<void> {
+  try {
+    if (typeof navigator !== "undefined" && navigator.vibrate) {
+      navigator.vibrate([160, 90, 160, 90, 220, 120, 280]);
+    }
+  } catch {
+    /* ignore */
+  }
+
   const ctx = new AudioContext();
   await ctx.resume().catch(() => {});
 
@@ -40,16 +48,21 @@ export async function playTimerCompleteRing(): Promise<void> {
     o.type = "sine";
     o.frequency.value = freq;
     g.gain.setValueAtTime(0.0001, at);
-    g.gain.exponentialRampToValueAtTime(vol, at + 0.02);
-    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.2);
+    g.gain.exponentialRampToValueAtTime(vol, at + 0.022);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.35);
     o.connect(g).connect(ctx.destination);
     o.start(at);
-    o.stop(at + 0.22);
+    o.stop(at + 0.38);
   };
 
-  ring(880, t, 0.045);
-  ring(1174.66, t + 0.14, 0.035);
+  const volMain = 0.075;
+  const volEcho = 0.045;
+  /* Two short phrases so it’s noticeable on phone speakers. */
+  ring(880, t, volMain);
+  ring(1174.66, t + 0.18, volEcho);
+  ring(880, t + 0.4, volMain);
+  ring(1318.51, t + 0.58, volEcho);
 
-  await new Promise((r) => setTimeout(r, 450));
-  await ctx.close();
+  await new Promise((r) => setTimeout(r, 1200));
+  await ctx.close().catch(() => {});
 }

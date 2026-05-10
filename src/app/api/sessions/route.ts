@@ -34,12 +34,16 @@ export async function POST(req: Request) {
   if (!projectId || !workDate) {
     return NextResponse.json({ error: "Missing fields" }, { status: 400 });
   }
-  if (!Number.isFinite(durationSec) || durationSec < 60 || durationSec > 24 * 3600) {
+  if (
+    !Number.isFinite(durationSec) ||
+    durationSec < 1 ||
+    durationSec > 24 * 3600
+  ) {
     return NextResponse.json({ error: "Invalid duration" }, { status: 400 });
   }
   if (summary.length < 1 || summary.length > 4000) {
     return NextResponse.json(
-      { error: "Please describe what you accomplished" },
+      { error: "Add a short note about what you worked on" },
       { status: 400 },
     );
   }

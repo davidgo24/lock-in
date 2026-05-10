@@ -45,8 +45,8 @@ export function WorkEntriesFeed({
   entries,
   displayName,
   title = "Your sessions",
-  subtitle = "Newest logs — proof you showed up.",
-  emptyMessage = "Complete a sesh and save it to see entries here.",
+  subtitle = "Newest entries — a simple record of what you focused on.",
+  emptyMessage = "Finish a focus block and save a note to see entries here.",
 }: Props) {
   return (
     <div>
@@ -84,7 +84,7 @@ export function WorkEntriesFeed({
                           {formatWorkedFor(e.durationSec)}
                           <span className="opacity-50"> · </span>
                           <span className="text-[var(--foreground)]/70">
-                            {e.project.isMisc ? "Misc. tasks" : e.project.name}
+                            {e.project.isMisc ? "General" : e.project.name}
                           </span>
                         </p>
                       </div>

@@ -13,7 +13,7 @@ export async function ensureDefaultData(userId: string) {
   });
   if (!misc) {
     await prisma.project.create({
-      data: { userId, name: "Misc. tasks", isMisc: true },
+      data: { userId, name: "General", isMisc: true },
     });
   }
 }

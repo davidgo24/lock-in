@@ -124,7 +124,7 @@ export function ContributionHeatmap({ heatmap, rangeStartKey }: Props) {
 
   if (weeks.length === 0) {
     return (
-      <p className="text-sm text-[var(--app-muted)]">No days to show yet — log a session.</p>
+      <p className="text-sm text-[var(--app-muted)]">No days to show yet — log a focus block.</p>
     );
   }
 

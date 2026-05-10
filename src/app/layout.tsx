@@ -19,7 +19,8 @@ const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "5to9 Club";
 
 export const metadata: Metadata = {
   title: appName,
-  description: "Log focused sessions, see your journey, build with friends",
+  description:
+    "Timer-based focus sessions, a simple activity log, and optional friends for accountability.",
   appleWebApp: {
     capable: true,
     title: appName,

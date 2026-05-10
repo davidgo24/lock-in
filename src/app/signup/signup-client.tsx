@@ -48,7 +48,7 @@ export function SignupClient() {
           Sign up
         </h1>
         <p className="mt-1 text-sm text-[var(--app-muted)]">
-          Create your space to clock sessions and track proof.
+          Create an account to run focus timers and keep an honest log.
         </p>
         <form className="mt-6 space-y-4" onSubmit={(e) => void onSubmit(e)}>
           <div>

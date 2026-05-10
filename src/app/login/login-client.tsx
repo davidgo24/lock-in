@@ -45,7 +45,7 @@ export function LoginClient() {
           Sign in
         </h1>
         <p className="mt-1 text-sm text-[var(--app-muted)]">
-          Welcome back — log your next sesh.
+          Welcome back — ready for another focus block?
         </p>
         <form className="mt-6 space-y-4" onSubmit={(e) => void onSubmit(e)}>
           <div>
