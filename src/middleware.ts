@@ -36,6 +36,10 @@ export async function middleware(req: NextRequest) {
     if (typeof payload.sub !== "string" || !payload.sub) {
       throw new Error("Invalid subject");
     }
+    // Pre-multi-user apps issued JWTs with sub "me"; those IDs are not real User rows.
+    if (payload.sub === "me") {
+      throw new Error("Legacy session");
+    }
     return NextResponse.next();
   } catch {
     if (pathname.startsWith("/api/")) {
@@ -44,7 +48,9 @@ export async function middleware(req: NextRequest) {
     const url = req.nextUrl.clone();
     url.pathname = "/login";
     url.searchParams.set("next", pathname);
-    return NextResponse.redirect(url);
+    const res = NextResponse.redirect(url);
+    res.cookies.delete(COOKIE);
+    return res;
   }
 }
 

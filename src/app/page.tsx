@@ -16,17 +16,20 @@ export default async function Home() {
     redirect("/login");
   }
 
-  await ensureDefaultData(userId);
-
   const user = await prisma.user.findUnique({
     where: { id: userId },
     select: { displayName: true, email: true },
   });
 
+  // Old single-user JWTs used sub "me" — no User row → would break ensureDefaultData (FK).
+  if (!user) {
+    redirect("/login");
+  }
+
+  await ensureDefaultData(userId);
+
   const displayName =
-    user?.displayName?.trim() ||
-    user?.email?.split("@")[0] ||
-    "You";
+    user.displayName?.trim() || user.email.split("@")[0] || "You";
 
   const [projectRows, initialStats, entryRows] = await Promise.all([
     prisma.project.findMany({
