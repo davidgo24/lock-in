@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { ActivityApp } from "@/components/ActivityApp";
 import { ensureDefaultData } from "@/lib/bootstrap";
 import { getSessionUserId } from "@/lib/auth";
+import { getHomeViewer, homeViewerHasAvatar } from "@/lib/home-viewer";
 import { prisma } from "@/lib/prisma";
 import { getFriendsState } from "@/lib/friends";
 import { getStatsBundle, getProjectSessionAggregates } from "@/lib/stats";
@@ -21,15 +22,14 @@ export default async function Home() {
     redirect("/login");
   }
 
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
-    select: { displayName: true, email: true },
-  });
+  const user = await getHomeViewer(userId);
 
   // Old single-user JWTs used sub "me" — no User row → would break ensureDefaultData (FK).
   if (!user) {
     redirect("/login");
   }
+
+  const initialViewerHasAvatar = homeViewerHasAvatar(user);
 
   await ensureDefaultData(userId);
 
@@ -102,6 +102,8 @@ export default async function Home() {
           initialFriendsState={friendsState}
           displayName={displayName}
           appName={appName}
+          viewerUserId={userId}
+          initialViewerHasAvatar={initialViewerHasAvatar}
         />
       </Suspense>
     </div>

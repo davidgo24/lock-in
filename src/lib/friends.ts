@@ -5,6 +5,7 @@ const userPublicSelect = {
   id: true,
   displayName: true,
   handle: true,
+  avatarBytes: true,
 } as const satisfies Prisma.UserSelect;
 
 const friendPublicSelect = {
@@ -44,6 +45,7 @@ export type FriendsStatePayload = {
     userId: string;
     handle: string | null;
     label: string;
+    hasAvatar: boolean;
     /** ISO end time if friend is in an active focus block (in the future); otherwise null. */
     activeFocusEndsAt: string | null;
   }[];
@@ -95,6 +97,7 @@ export async function getFriendsState(userId: string): Promise<FriendsStatePaylo
         userId: u.id,
         handle: u.handle,
         label: publicLabel(u),
+        hasAvatar: u.avatarBytes != null && u.avatarBytes.length > 0,
         activeFocusEndsAt: active,
       };
     }),

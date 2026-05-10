@@ -23,7 +23,7 @@ const friendFeedSelect = {
     select: {
       name: true,
       isMisc: true,
-      user: { select: { id: true, displayName: true, handle: true } },
+      user: { select: { id: true, displayName: true, handle: true, avatarBytes: true } },
     },
   },
 } as const satisfies Prisma.ActivitySessionSelect;
@@ -79,6 +79,10 @@ export function mapFriendFeedEntryToClient(
     workDate: e.workDate.toISOString().slice(0, 10),
     project: { name: e.project.name, isMisc: e.project.isMisc },
     authorLabel,
+    authorUserId: e.project.user.id,
+    authorHasAvatar:
+      e.project.user.avatarBytes != null &&
+      e.project.user.avatarBytes.length > 0,
     social: s,
   };
 }

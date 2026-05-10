@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   WorkEntriesFeed,
@@ -15,8 +16,45 @@ import {
   type FriendNotice,
 } from "@/components/activity-app/friend-notice-styles";
 
+function FriendMiniAvatar(props: {
+  userId: string;
+  hasAvatar: boolean;
+  initial: string;
+  cacheBust: number;
+}) {
+  const { userId, hasAvatar, initial, cacheBust } = props;
+  const [failed, setFailed] = useState(false);
+  if (hasAvatar && !failed) {
+    const qs = cacheBust > 0 ? `?v=${cacheBust}` : "";
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={`/api/avatar/${userId}${qs}`}
+        alt=""
+        width={36}
+        height={36}
+        className="h-9 w-9 shrink-0 rounded-full border border-[var(--app-border)] object-cover"
+        onError={() => setFailed(true)}
+      />
+    );
+  }
+  return (
+    <div
+      className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-[var(--app-border)] bg-[var(--app-accent)]/10 text-xs font-semibold text-[var(--app-accent)]"
+      aria-hidden
+    >
+      {initial}
+    </div>
+  );
+}
+
 export type CommunitySidebarProps = {
   displayName: string;
+  viewerUserId: string;
+  viewerHasAvatar: boolean;
+  avatarCacheBust: number;
+  onViewerAvatarChange: (hasAvatar: boolean) => void;
+  onAvatarNotice: (message: string, kind: FriendNotice["kind"]) => void;
   workEntries: WorkEntryRow[];
   friendFeed: WorkEntryRow[];
   friendsState: FriendsStatePayload;
@@ -43,6 +81,11 @@ export type CommunitySidebarProps = {
 
 export function CommunitySidebar({
   displayName,
+  viewerUserId,
+  viewerHasAvatar,
+  avatarCacheBust,
+  onViewerAvatarChange,
+  onAvatarNotice,
   workEntries,
   friendFeed,
   friendsState,
@@ -66,6 +109,7 @@ export function CommunitySidebar({
   onCopyAppLink,
   refreshEntryFeeds,
 }: CommunitySidebarProps) {
+  const [avatarBusy, setAvatarBusy] = useState(false);
   return (
     <aside className="order-3 min-w-0 xl:sticky xl:top-4 xl:self-start">
       <div
@@ -121,6 +165,9 @@ export function CommunitySidebar({
             title="Your activity"
             subtitle="Newest entries — your accountability trail."
             emptyMessage="Finish a focus block and log it to see entries here."
+            viewerUserId={viewerUserId}
+            viewerHasAvatar={viewerHasAvatar}
+            avatarCacheBust={avatarCacheBust}
           />
           <p className="mt-4 text-center text-xs text-[var(--app-muted)]">
             <button
@@ -198,6 +245,95 @@ export function CommunitySidebar({
                   3–30 characters: lowercase letters, numbers, underscores.
                   Used so friends can find you — not your password.
                 </p>
+              </div>
+
+              <div className="mt-5 space-y-2 border-t border-[var(--app-border)] pt-4">
+                <label className="text-xs font-medium text-[var(--app-muted)]">
+                  Profile photo
+                </label>
+                <p className="text-xs text-[var(--app-muted)]">
+                  JPEG, PNG, GIF, or WebP — max 512KB. Friends see this next to
+                  your activity.
+                </p>
+                <div className="flex flex-wrap items-center gap-3">
+                  <FriendMiniAvatar
+                    userId={viewerUserId}
+                    hasAvatar={viewerHasAvatar}
+                    initial={displayName.trim().charAt(0).toUpperCase() || "?"}
+                    cacheBust={avatarCacheBust}
+                  />
+                  <label className="inline-flex min-h-10 cursor-pointer items-center rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-3 py-2 text-xs font-medium text-[var(--foreground)] hover:bg-[var(--background)] disabled:opacity-50">
+                    <input
+                      type="file"
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      className="sr-only"
+                      disabled={avatarBusy}
+                      onChange={(ev) => {
+                        const file = ev.target.files?.[0];
+                        ev.target.value = "";
+                        if (!file) return;
+                        setAvatarBusy(true);
+                        const fd = new FormData();
+                        fd.set("file", file);
+                        void (async () => {
+                          try {
+                            const res = await fetch("/api/profile/avatar", {
+                              method: "POST",
+                              body: fd,
+                            });
+                            const j = (await res.json().catch(() => ({}))) as {
+                              error?: string;
+                            };
+                            if (!res.ok) {
+                              onAvatarNotice(
+                                j.error ?? "Could not upload photo.",
+                                "error",
+                              );
+                              return;
+                            }
+                            onViewerAvatarChange(true);
+                          } finally {
+                            setAvatarBusy(false);
+                          }
+                        })();
+                      }}
+                    />
+                    {avatarBusy ? "Uploading…" : "Choose image"}
+                  </label>
+                  {viewerHasAvatar ? (
+                    <button
+                      type="button"
+                      disabled={avatarBusy}
+                      className="min-h-10 rounded-lg border border-[var(--app-border)] px-3 py-2 text-xs text-[var(--app-muted)] disabled:opacity-50"
+                      onClick={() => {
+                        setAvatarBusy(true);
+                        void (async () => {
+                          try {
+                            const res = await fetch("/api/profile/avatar", {
+                              method: "DELETE",
+                            });
+                            if (res.ok) {
+                              onViewerAvatarChange(false);
+                              onAvatarNotice("Profile photo removed.", "info");
+                            } else {
+                              const j = (await res.json().catch(() => ({}))) as {
+                                error?: string;
+                              };
+                              onAvatarNotice(
+                                j.error ?? "Could not remove photo.",
+                                "error",
+                              );
+                            }
+                          } finally {
+                            setAvatarBusy(false);
+                          }
+                        })();
+                      }}
+                    >
+                      Remove photo
+                    </button>
+                  ) : null}
+                </div>
               </div>
 
               <div className="mt-5 space-y-2 border-t border-[var(--app-border)] pt-4">
@@ -312,15 +448,25 @@ export function CommunitySidebar({
                           className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
                         >
                           <div className="flex items-center justify-between gap-2">
-                            <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
-                              {f.label}
-                              {f.handle ? (
-                                <span className="text-[var(--app-muted)]">
-                                  {" "}
-                                  · @{f.handle}
-                                </span>
-                              ) : null}
-                            </span>
+                            <div className="flex min-w-0 flex-1 items-center gap-2">
+                              <FriendMiniAvatar
+                                userId={f.userId}
+                                hasAvatar={f.hasAvatar}
+                                initial={
+                                  f.label.trim().charAt(0).toUpperCase() || "?"
+                                }
+                                cacheBust={avatarCacheBust}
+                              />
+                              <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
+                                {f.label}
+                                {f.handle ? (
+                                  <span className="text-[var(--app-muted)]">
+                                    {" "}
+                                    · @{f.handle}
+                                  </span>
+                                ) : null}
+                              </span>
+                            </div>
                             <button
                               type="button"
                               className={`shrink-0 text-xs underline ${
@@ -429,6 +575,7 @@ export function CommunitySidebar({
               onRefresh={refreshEntryFeeds}
               title="Friends&apos; activity"
               subtitle="Clap or leave a note on their sessions — they&apos;ll see it in notifications."
+              avatarCacheBust={avatarCacheBust}
               emptyMessage={
                 friendsState.friends.length === 0
                   ? friendsPanelExpanded

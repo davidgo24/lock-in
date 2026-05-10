@@ -11,7 +11,7 @@ export async function GET() {
 
   const u = await prisma.user.findUnique({
     where: { id: userId },
-    select: { handle: true, displayName: true },
+    select: { handle: true, displayName: true, avatarBytes: true },
   });
   if (!u) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
@@ -20,6 +20,7 @@ export async function GET() {
   return NextResponse.json({
     handle: u.handle,
     displayName: u.displayName,
+    hasAvatar: u.avatarBytes != null && u.avatarBytes.length > 0,
   });
 }
 

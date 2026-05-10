@@ -16,6 +16,9 @@ model User {
   handle            String?   @unique
   /// When set and in the future, friends may show “in focus” (synced while a timer is running).
   activeFocusEndsAt DateTime?
+  /// Optional profile picture (served from /api/avatar/[userId] for self + friends).
+  avatarBytes       Bytes?
+  avatarMime        String?
   createdAt         DateTime  @default(now())
   projects     Project[]
   settings     AppSettings?

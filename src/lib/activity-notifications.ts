@@ -5,6 +5,7 @@ const actorSelect = {
   id: true,
   displayName: true,
   handle: true,
+  avatarBytes: true,
 } as const;
 
 export type ActivityNotificationItem = {

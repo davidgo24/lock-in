@@ -153,6 +153,7 @@ const commentUserSelect = {
   id: true,
   displayName: true,
   handle: true,
+  avatarBytes: true,
 } as const;
 
 type CommentWithUser = {
@@ -162,6 +163,7 @@ type CommentWithUser = {
     id: string;
     displayName: string | null;
     handle: string | null;
+    avatarBytes: Uint8Array | null;
   };
 };
 

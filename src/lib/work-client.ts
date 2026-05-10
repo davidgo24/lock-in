@@ -18,6 +18,8 @@ export type ApiWorkEntry = {
   workDate: string | Date;
   project: { name: string; isMisc: boolean };
   authorLabel?: string;
+  authorUserId?: string;
+  authorHasAvatar?: boolean;
   social?: {
     clapCount: number;
     clappedByMe: boolean;
@@ -41,6 +43,8 @@ export function parseWorkEntryFromApi(e: ApiWorkEntry): WorkEntryRow {
         : new Date(e.workDate).toISOString().slice(0, 10),
     project: e.project,
     authorLabel: e.authorLabel,
+    authorUserId: e.authorUserId,
+    authorHasAvatar: e.authorHasAvatar,
     social: e.social,
   };
 }

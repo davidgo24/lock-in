@@ -163,6 +163,8 @@ type ActivityAppProps = {
   initialFriendsState: FriendsStatePayload;
   displayName: string;
   appName: string;
+  viewerUserId: string;
+  initialViewerHasAvatar: boolean;
 };
 
 export function ActivityApp({
@@ -174,6 +176,8 @@ export function ActivityApp({
   initialFriendsState,
   displayName,
   appName,
+  viewerUserId,
+  initialViewerHasAvatar,
 }: ActivityAppProps) {
   const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>(initialProjects);
@@ -237,6 +241,8 @@ export function ActivityApp({
   );
   /** Community tab: full friends UI is heavy — keep a slim summary until the user expands. */
   const [friendsPanelExpanded, setFriendsPanelExpanded] = useState(false);
+  const [viewerHasAvatar, setViewerHasAvatar] = useState(initialViewerHasAvatar);
+  const [avatarCacheBust, setAvatarCacheBust] = useState(0);
   const [dashNotice, setDashNotice] = useState<FriendNotice | null>(null);
   const [pendingDiscard, setPendingDiscard] = useState(false);
   const pendingDiscardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -334,6 +340,12 @@ export function ActivityApp({
       const misc = (pJson.projects ?? []).find((x: Project) => x.isMisc);
       return misc?.id ?? (pJson.projects?.[0]?.id ?? "");
     });
+
+    const profRes = await fetch("/api/profile");
+    if (profRes.ok) {
+      const pj = await profRes.json();
+      setViewerHasAvatar(!!(pj as { hasAvatar?: boolean }).hasAvatar);
+    }
   }, []);
 
   const refreshEntryFeeds = useCallback(async () => {
@@ -1693,6 +1705,20 @@ export function ActivityApp({
 
         <CommunitySidebar
           displayName={displayName}
+          viewerUserId={viewerUserId}
+          viewerHasAvatar={viewerHasAvatar}
+          avatarCacheBust={avatarCacheBust}
+          onViewerAvatarChange={(has) => {
+            setViewerHasAvatar(has);
+            setAvatarCacheBust((n) => n + 1);
+            if (has) {
+              setFriendNotice({
+                text: "Profile photo updated.",
+                kind: "success",
+              });
+            }
+          }}
+          onAvatarNotice={(msg, kind) => setFriendNotice({ text: msg, kind })}
           workEntries={workEntries}
           friendFeed={friendFeed}
           friendsState={friendsState}

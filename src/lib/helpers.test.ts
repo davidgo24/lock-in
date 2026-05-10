@@ -6,6 +6,23 @@ import {
 import { friendshipKeyPair, publicLabel } from "@/lib/friends";
 import { normalizeHandleInput, validateHandle } from "@/lib/handle";
 
+import { sniffAvatarMime, validateAvatarFile } from "@/lib/avatar";
+
+describe("avatar", () => {
+  it("sniffs jpeg and png", () => {
+    expect(sniffAvatarMime(new Uint8Array([0xff, 0xd8, 0xff, 0xe0]))).toBe(
+      "image/jpeg",
+    );
+    expect(
+      sniffAvatarMime(new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0, 0, 0, 0])),
+    ).toBe("image/png");
+  });
+
+  it("validateAvatarFile rejects tiny buffer", () => {
+    expect(validateAvatarFile(new Uint8Array([0xff, 0xd8]))).toBeNull();
+  });
+});
+
 describe("handle", () => {
   it("normalizes @ and case", () => {
     expect(normalizeHandleInput("  @Alex_CODE  ")).toBe("alex_code");
@@ -43,10 +60,11 @@ describe("friends", () => {
         id: "1",
         displayName: " Pat ",
         handle: "pat",
+        avatarBytes: null,
       }),
     ).toBe("Pat");
     expect(
-      publicLabel({ id: "1", displayName: null, handle: "pat" }),
+      publicLabel({ id: "1", displayName: null, handle: "pat", avatarBytes: null }),
     ).toBe("@pat");
   });
 });

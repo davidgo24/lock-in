@@ -18,8 +18,46 @@ export type WorkEntryRow = {
   project: { name: string; isMisc: boolean };
   /** When set (friend feed), shown instead of `displayName`. */
   authorLabel?: string;
+  /** Friend feed: session owner — for profile photo. */
+  authorUserId?: string;
+  authorHasAvatar?: boolean;
   social?: ActivitySocial;
 };
+
+function SessionAvatar(props: {
+  userId?: string;
+  hasAvatar?: boolean;
+  initial: string;
+  /** Bump after upload/remove so the browser refetches `/api/avatar/...`. */
+  cacheBust?: number;
+}) {
+  const { userId, hasAvatar, initial, cacheBust = 0 } = props;
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (userId && hasAvatar && !imgFailed) {
+    const qs = cacheBust > 0 ? `?v=${cacheBust}` : "";
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- authenticated same-origin blob API
+      <img
+        src={`/api/avatar/${userId}${qs}`}
+        alt=""
+        width={44}
+        height={44}
+        className="h-11 w-11 shrink-0 rounded-full border border-[var(--app-accent-muted)] object-cover"
+        onError={() => setImgFailed(true)}
+      />
+    );
+  }
+
+  return (
+    <div
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--app-accent-muted)] bg-[var(--app-accent)]/10 text-sm font-semibold text-[var(--app-accent)]"
+      aria-hidden
+    >
+      {initial}
+    </div>
+  );
+}
 
 function formatWorkedFor(sec: number): string {
   if (sec < 60) return `Worked for ${sec}s`;
@@ -56,9 +94,15 @@ type FriendEntryProps = {
   e: WorkEntryRow;
   displayName: string;
   onAfterMutation: () => void | Promise<void>;
+  avatarCacheBust?: number;
 };
 
-function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
+function FriendEntryRow({
+  e,
+  displayName,
+  onAfterMutation,
+  avatarCacheBust = 0,
+}: FriendEntryProps) {
   const social = e.social ?? defaultSocial();
   const label = (e.authorLabel ?? displayName).trim();
   const initial = label.charAt(0).toUpperCase() || "?";
@@ -136,12 +180,12 @@ function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
   return (
     <li className="rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 p-4">
       <div className="flex gap-3">
-        <div
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--app-accent-muted)] bg-[var(--app-accent)]/10 text-sm font-semibold text-[var(--app-accent)]"
-          aria-hidden
-        >
-          {initial}
-        </div>
+        <SessionAvatar
+          userId={e.authorUserId}
+          hasAvatar={e.authorHasAvatar}
+          initial={initial}
+          cacheBust={avatarCacheBust}
+        />
         <div className="min-w-0 flex-1">
           <div className="flex items-start justify-between gap-2">
             <div>
@@ -314,6 +358,11 @@ type Props = {
   /** Friend feed: clap + comment. */
   variant?: "you" | "friend";
   onRefresh?: () => void | Promise<void>;
+  /** Your user id — "You" feed shows your photo when set. */
+  viewerUserId?: string;
+  viewerHasAvatar?: boolean;
+  /** Increment after avatar upload/remove to bust cache. */
+  avatarCacheBust?: number;
 };
 
 export function WorkEntriesFeed({
@@ -324,6 +373,9 @@ export function WorkEntriesFeed({
   emptyMessage = "Finish a focus block and save a note to see entries here.",
   variant = "you",
   onRefresh,
+  viewerUserId,
+  viewerHasAvatar,
+  avatarCacheBust = 0,
 }: Props) {
   const noop = useCallback(() => {}, []);
   const refresh = onRefresh ?? noop;
@@ -347,6 +399,7 @@ export function WorkEntriesFeed({
                   e={e}
                   displayName={displayName}
                   onAfterMutation={refresh}
+                  avatarCacheBust={avatarCacheBust}
                 />
               );
             }
@@ -361,12 +414,12 @@ export function WorkEntriesFeed({
                 className="rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 p-4"
               >
                 <div className="flex gap-3">
-                  <div
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--app-accent-muted)] bg-[var(--app-accent)]/10 text-sm font-semibold text-[var(--app-accent)]"
-                    aria-hidden
-                  >
-                    {initial}
-                  </div>
+                  <SessionAvatar
+                    userId={viewerUserId}
+                    hasAvatar={viewerHasAvatar}
+                    initial={initial}
+                    cacheBust={avatarCacheBust}
+                  />
                   <div className="min-w-0 flex-1">
                     <div className="flex items-start justify-between gap-2">
                       <div>
