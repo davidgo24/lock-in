@@ -64,6 +64,8 @@ function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
   const initial = label.charAt(0).toUpperCase() || "?";
   const [commentDraft, setCommentDraft] = useState(social.myComment ?? "");
   const [busy, setBusy] = useState<"clap" | "comment" | "delete" | null>(null);
+  /** Keep the session note editor tucked away so the main caption + thread stay primary. */
+  const [noteEditorOpen, setNoteEditorOpen] = useState(false);
 
   useEffect(() => {
     setCommentDraft(social.myComment ?? "");
@@ -98,6 +100,7 @@ function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
       });
       if (!res.ok) return;
       await runRefresh();
+      setNoteEditorOpen(false);
     } finally {
       setBusy(null);
     }
@@ -113,10 +116,21 @@ function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
       if (!res.ok) return;
       setCommentDraft("");
       await runRefresh();
+      setNoteEditorOpen(false);
     } finally {
       setBusy(null);
     }
   }
+
+  function closeNoteEditor() {
+    setCommentDraft(social.myComment ?? "");
+    setNoteEditorOpen(false);
+  }
+
+  const myNotePreview =
+    social.myComment && social.myComment.length > 120
+      ? `${social.myComment.slice(0, 117)}…`
+      : social.myComment;
 
   return (
     <li className="rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 p-4">
@@ -192,42 +206,93 @@ function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
             </ul>
           ) : null}
 
-          <div className="mt-3 space-y-2">
-            <label className="text-[10px] font-medium uppercase tracking-wide text-[var(--app-muted)]">
-              Your note (one per post — edits stay private to the thread)
-            </label>
-            <textarea
-              className="min-h-[72px] w-full rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-2 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
-              placeholder="Say something kind…"
-              maxLength={500}
-              value={commentDraft}
-              onChange={(ev) => setCommentDraft(ev.target.value)}
-              disabled={busy !== null}
-            />
-            <div className="flex flex-wrap gap-2">
-              <button
-                type="button"
-                disabled={busy !== null || commentDraft.trim().length < 1}
-                onClick={() => void onSaveComment()}
-                className="min-h-9 rounded-lg bg-[var(--app-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
-              >
-                {busy === "comment"
-                  ? "Saving…"
-                  : social.myComment
-                    ? "Update note"
-                    : "Post note"}
-              </button>
-              {social.myComment ? (
-                <button
-                  type="button"
+          <div className="mt-3 border-t border-[var(--app-border)] pt-3">
+            {!noteEditorOpen ? (
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                {social.myComment ? (
+                  <>
+                    <p className="min-w-0 flex-1 text-xs leading-snug text-[var(--foreground)]/85">
+                      <span className="font-medium text-[var(--foreground)]/90">
+                        Your note
+                      </span>
+                      <span className="text-[var(--app-muted)]"> · </span>
+                      <span className="whitespace-pre-wrap break-words">
+                        {myNotePreview}
+                      </span>
+                    </p>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => setNoteEditorOpen(true)}
+                      className="shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2.5 py-1.5 text-xs font-medium text-[var(--foreground)] disabled:opacity-50"
+                    >
+                      Edit
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => setNoteEditorOpen(true)}
+                    className="rounded-lg border border-dashed border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2 text-xs font-medium text-[var(--app-muted)] hover:text-[var(--foreground)] disabled:opacity-50"
+                  >
+                    Add a note on this session
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <label
+                    id={`friend-note-label-${e.id}`}
+                    className="text-[10px] font-medium uppercase tracking-wide text-[var(--app-muted)]"
+                  >
+                    Your note (one per post — private to this thread)
+                  </label>
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={closeNoteEditor}
+                    className="text-[10px] font-medium uppercase tracking-wide text-[var(--app-accent)] hover:underline disabled:opacity-50"
+                  >
+                    Close
+                  </button>
+                </div>
+                <textarea
+                  aria-labelledby={`friend-note-label-${e.id}`}
+                  className="min-h-[72px] w-full rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-2 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                  placeholder="Say something kind…"
+                  maxLength={500}
+                  value={commentDraft}
+                  onChange={(ev) => setCommentDraft(ev.target.value)}
                   disabled={busy !== null}
-                  onClick={() => void onDeleteComment()}
-                  className="min-h-9 rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs text-[var(--app-muted)] disabled:opacity-50"
-                >
-                  {busy === "delete" ? "…" : "Remove my note"}
-                </button>
-              ) : null}
-            </div>
+                />
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    disabled={busy !== null || commentDraft.trim().length < 1}
+                    onClick={() => void onSaveComment()}
+                    className="min-h-9 rounded-lg bg-[var(--app-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                  >
+                    {busy === "comment"
+                      ? "Saving…"
+                      : social.myComment
+                        ? "Update note"
+                        : "Post note"}
+                  </button>
+                  {social.myComment ? (
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => void onDeleteComment()}
+                      className="min-h-9 rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs text-[var(--app-muted)] disabled:opacity-50"
+                    >
+                      {busy === "delete" ? "…" : "Remove my note"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+            )}
           </div>
 
           <p className="mt-2 text-right text-xs text-[var(--app-muted)]">

@@ -1490,13 +1490,23 @@ export function ActivityApp({
             <button
               type="button"
               onClick={() => void toggleNotifPanel()}
-              className="relative inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2.5 py-2 text-[var(--foreground)] active:opacity-90"
+              className={`relative inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border bg-[var(--app-surface-card)] px-2.5 py-2 text-[var(--foreground)] active:opacity-90 ${
+                notif.unreadCount > 0
+                  ? "border-rose-500/70 ring-2 ring-rose-500/35 ring-offset-2 ring-offset-[var(--background)] dark:border-rose-400/60 dark:ring-rose-400/30"
+                  : "border-[var(--app-border)]"
+              }`}
               aria-expanded={notifOpen}
               aria-label="Activity notifications"
             >
-              <Bell className="h-4 w-4 shrink-0" />
+              <Bell
+                className={`h-4 w-4 shrink-0 ${
+                  notif.unreadCount > 0
+                    ? "text-rose-600 dark:text-rose-400"
+                    : ""
+                }`}
+              />
               {notif.unreadCount > 0 ? (
-                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--app-accent)] px-1 text-[10px] font-bold text-white tabular-nums">
+                <span className="absolute -right-1.5 -top-1.5 flex min-h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-rose-600 px-1.5 text-[11px] font-extrabold leading-none text-white shadow-md shadow-rose-600/55 ring-2 ring-white tabular-nums dark:bg-rose-500 dark:shadow-rose-500/50 dark:ring-[var(--background)]">
                   {notif.unreadCount > 9 ? "9+" : notif.unreadCount}
                 </span>
               ) : null}
