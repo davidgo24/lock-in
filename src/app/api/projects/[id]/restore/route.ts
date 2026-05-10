@@ -4,7 +4,7 @@ import { prisma } from "@/lib/prisma";
 
 type Params = { params: Promise<{ id: string }> };
 
-export async function DELETE(_req: Request, { params }: Params) {
+export async function POST(_req: Request, { params }: Params) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -18,20 +18,14 @@ export async function DELETE(_req: Request, { params }: Params) {
   if (!existing) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
-  if (existing.isMisc) {
-    return NextResponse.json(
-      { error: "Cannot archive misc project" },
-      { status: 400 },
-    );
-  }
 
-  if (existing.archivedAt != null) {
-    return NextResponse.json({ error: "Already archived" }, { status: 400 });
+  if (existing.archivedAt == null) {
+    return NextResponse.json({ error: "Not archived" }, { status: 400 });
   }
 
   await prisma.project.update({
     where: { id },
-    data: { archivedAt: new Date() },
+    data: { archivedAt: null },
   });
   return NextResponse.json({ ok: true });
 }

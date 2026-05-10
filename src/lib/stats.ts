@@ -112,7 +112,7 @@ export async function getStatsBundle(userId: string) {
   });
 
   const activeProjectsCount = await prisma.project.count({
-    where: { userId },
+    where: { userId, archivedAt: null },
   });
 
   const settings = await prisma.appSettings.findUnique({

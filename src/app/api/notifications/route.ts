@@ -1,16 +1,12 @@
 import { NextResponse } from "next/server";
-import {
-  getFriendFeedForClient,
-  getRecentEntriesForClient,
-} from "@/lib/work-entries";
 import { getSessionUserId } from "@/lib/auth";
+import { listNotificationsForUser } from "@/lib/activity-notifications";
 
 export async function GET() {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-
-  const entries = await getRecentEntriesForClient(userId);
-  return NextResponse.json({ entries });
+  const data = await listNotificationsForUser(userId);
+  return NextResponse.json(data);
 }

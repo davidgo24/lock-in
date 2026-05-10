@@ -7,6 +7,11 @@ const userPublicSelect = {
   handle: true,
 } as const satisfies Prisma.UserSelect;
 
+const friendPublicSelect = {
+  ...userPublicSelect,
+  activeFocusEndsAt: true,
+} as const satisfies Prisma.UserSelect;
+
 export type PublicUserMini = Prisma.UserGetPayload<{ select: typeof userPublicSelect }>;
 
 export function publicLabel(u: PublicUserMini): string {
@@ -39,6 +44,8 @@ export type FriendsStatePayload = {
     userId: string;
     handle: string | null;
     label: string;
+    /** ISO end time if friend is in an active focus block (in the future); otherwise null. */
+    activeFocusEndsAt: string | null;
   }[];
   incoming: {
     id: string;
@@ -62,7 +69,7 @@ export async function getFriendsState(userId: string): Promise<FriendsStatePaylo
       ? []
       : await prisma.user.findMany({
           where: { id: { in: friendIds } },
-          select: userPublicSelect,
+          select: friendPublicSelect,
         });
 
   const incomingRows = await prisma.friendRequest.findMany({
@@ -77,13 +84,20 @@ export async function getFriendsState(userId: string): Promise<FriendsStatePaylo
     orderBy: { createdAt: "desc" },
   });
 
+  const now = new Date();
   return {
     myHandle: me?.handle ?? null,
-    friends: friends.map((u) => ({
-      userId: u.id,
-      handle: u.handle,
-      label: publicLabel(u),
-    })),
+    friends: friends.map((u) => {
+      const ends = u.activeFocusEndsAt;
+      const active =
+        ends != null && ends.getTime() > now.getTime() ? ends.toISOString() : null;
+      return {
+        userId: u.id,
+        handle: u.handle,
+        label: publicLabel(u),
+        activeFocusEndsAt: active,
+      };
+    }),
     incoming: incomingRows.map((r) => ({
       id: r.id,
       from: {

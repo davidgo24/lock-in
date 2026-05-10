@@ -7,9 +7,8 @@ import { prisma } from "@/lib/prisma";
 import { getFriendsState } from "@/lib/friends";
 import { getStatsBundle } from "@/lib/stats";
 import {
-  getFriendsWorkEntries,
-  getRecentWorkEntries,
-  mapFriendFeedEntryToClient,
+  getFriendFeedForClient,
+  getRecentEntriesForClient,
 } from "@/lib/work-entries";
 
 const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "5to9 Club";
@@ -37,17 +36,34 @@ export default async function Home() {
   const displayName =
     user.displayName?.trim() || user.email.split("@")[0] || "You";
 
-  const [projectRows, initialStats, entryRows, friendsState, friendRows] =
+  type SidebarProject = {
+    id: string;
+    name: string;
+    isMisc: boolean;
+    archivedAt: Date | null;
+  };
+
+  const [projectRowsRaw, initialStats, initialWorkEntries, friendsState, initialFriendFeed] =
     await Promise.all([
       prisma.project.findMany({
         where: { userId },
         orderBy: [{ isMisc: "desc" }, { name: "asc" }],
       }),
       getStatsBundle(userId),
-      getRecentWorkEntries(userId),
+      getRecentEntriesForClient(userId),
       getFriendsState(userId),
-      getFriendsWorkEntries(userId),
+      getFriendFeedForClient(userId),
     ]);
+
+  const projectRows: SidebarProject[] = projectRowsRaw.map((p) => ({
+    id: p.id,
+    name: p.name,
+    isMisc: p.isMisc,
+    archivedAt: (p as { archivedAt?: Date | null }).archivedAt ?? null,
+  }));
+
+  const activeProjectRows = projectRows.filter((p) => p.archivedAt == null);
+  const archivedProjectRows = projectRows.filter((p) => p.archivedAt != null);
 
   const [totals, lastSessions] = await Promise.all([
     prisma.activitySession.groupBy({
@@ -69,7 +85,7 @@ export default async function Home() {
     lastSessions.map((t) => [t.projectId, t._max?.createdAt]),
   );
 
-  const initialProjects = projectRows.map((p) => ({
+  const initialProjects = activeProjectRows.map((p) => ({
     id: p.id,
     name: p.name,
     isMisc: p.isMisc,
@@ -77,16 +93,13 @@ export default async function Home() {
     lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
   }));
 
-  const initialWorkEntries = entryRows.map((e) => ({
-    id: e.id,
-    summary: e.summary,
-    durationSec: e.durationSec,
-    createdAt: e.createdAt.toISOString(),
-    workDate: e.workDate.toISOString().slice(0, 10),
-    project: e.project,
+  const initialArchivedProjects = archivedProjectRows.map((p) => ({
+    id: p.id,
+    name: p.name,
+    isMisc: p.isMisc,
+    totalSec: totalMap[p.id] ?? 0,
+    lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
   }));
-
-  const initialFriendFeed = friendRows.map(mapFriendFeedEntryToClient);
 
   return (
     <div className="min-h-dvh w-full max-w-[100vw] overflow-x-clip bg-[var(--background)]">
@@ -99,6 +112,7 @@ export default async function Home() {
       >
         <ActivityApp
           initialProjects={initialProjects}
+          initialArchivedProjects={initialArchivedProjects}
           initialStats={initialStats}
           initialWorkEntries={initialWorkEntries}
           initialFriendFeed={initialFriendFeed}

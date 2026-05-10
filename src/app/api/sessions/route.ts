@@ -49,7 +49,7 @@ export async function POST(req: Request) {
   }
 
   const project = await prisma.project.findFirst({
-    where: { id: projectId, userId },
+    where: { id: projectId, userId, archivedAt: null },
   });
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });

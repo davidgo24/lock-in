@@ -9,14 +9,16 @@ import {
 } from "react";
 import { useSearchParams } from "next/navigation";
 import {
+  Archive,
+  Bell,
   Clock,
   Flame,
   Folder,
   LogOut,
+  Pause,
   Play,
   Plus,
   RotateCcw,
-  Trash2,
   Trophy,
   X,
 } from "lucide-react";
@@ -32,9 +34,14 @@ import {
 } from "@/lib/sounds";
 import {
   notifyTimerComplete,
+  notifyTimerPausedLong,
   requestTimerNotifyPermissionIfNeeded,
 } from "@/lib/timer-notify";
 import { normalizeHandleInput, validateHandle } from "@/lib/handle";
+import {
+  focusMinutesLeftLabel,
+  focusQuipForUser,
+} from "@/lib/focus-quips";
 import type { FriendsStatePayload } from "@/lib/friends";
 import type { StatsBundle } from "@/lib/stats";
 
@@ -95,6 +102,29 @@ const PRESETS = [
   { label: "2h", seconds: 120 * 60 },
 ] as const;
 
+/** Match server cap in `/api/me/focus-status`. */
+const MIN_TIMER_SEC = 60;
+const MAX_TIMER_SEC = 25 * 60 * 60;
+const PAUSE_NUDGE_MS = 5 * 60 * 1000;
+const CUSTOM_PRESET_IDX = PRESETS.length;
+
+function clampDurationSec(sec: number): number {
+  return Math.max(
+    MIN_TIMER_SEC,
+    Math.min(MAX_TIMER_SEC, Math.floor(sec)),
+  );
+}
+
+function presetIdxForDuration(totalSec: number): number {
+  const i = PRESETS.findIndex((p) => p.seconds === totalSec);
+  return i >= 0 ? i : CUSTOM_PRESET_IDX;
+}
+
+function splitHoursMinutes(totalSec: number): { h: number; m: number } {
+  const s = clampDurationSec(totalSec);
+  return { h: Math.floor(s / 3600), m: Math.floor((s % 3600) / 60) };
+}
+
 function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
@@ -127,9 +157,23 @@ function defaultSelectedId(projects: Project[]) {
   return misc?.id ?? projects[0]?.id ?? "";
 }
 
-const TIMER_STORAGE_KEY = "activity-tracker-timer-v1";
+const TIMER_STORAGE_KEY = "activity-tracker-timer-v2";
 
-type PersistedTimer = {
+type PersistedTimerV2 = {
+  v: 2;
+  selectedId: string;
+  durationSec: number;
+  presetIdx: number;
+  paused: boolean;
+  remaining: number;
+  endsAt: number | null;
+  pausedSince: number | null;
+};
+
+/** @deprecated Old key used v1 shapes; we still read them once for migration. */
+const LEGACY_TIMER_STORAGE_KEY = "activity-tracker-timer-v1";
+
+type PersistedTimerV1 = {
   v: 1;
   endsAt: number;
   durationSec: number;
@@ -137,30 +181,101 @@ type PersistedTimer = {
   selectedId: string;
 };
 
-function parsePersisted(raw: string | null): PersistedTimer | null {
+function parsePersisted(raw: string | null): PersistedTimerV2 | null {
   if (raw == null || typeof window === "undefined") return null;
   try {
-    const o = JSON.parse(raw) as Partial<PersistedTimer>;
-    if (o.v !== 1) return null;
-    if (typeof o.endsAt !== "number" || typeof o.durationSec !== "number")
-      return null;
-    if (typeof o.presetIdx !== "number" || typeof o.selectedId !== "string")
-      return null;
-    if (
-      !Number.isFinite(o.endsAt) ||
-      o.durationSec < 1 ||
-      o.presetIdx < 0 ||
-      o.presetIdx >= PRESETS.length
-    ) {
-      return null;
+    const o = JSON.parse(raw) as Record<string, unknown>;
+    if (o.v === 2) {
+      const p = o as Partial<PersistedTimerV2>;
+      if (typeof p.selectedId !== "string") return null;
+      if (typeof p.durationSec !== "number" || typeof p.remaining !== "number")
+        return null;
+      if (typeof p.presetIdx !== "number") return null;
+      if (typeof p.paused !== "boolean") return null;
+      if (p.endsAt != null && typeof p.endsAt !== "number") return null;
+      if (p.pausedSince != null && typeof p.pausedSince !== "number")
+        return null;
+      if (
+        !Number.isFinite(p.durationSec) ||
+        p.durationSec < MIN_TIMER_SEC ||
+        p.presetIdx < 0 ||
+        p.presetIdx > CUSTOM_PRESET_IDX
+      ) {
+        return null;
+      }
+      return {
+        v: 2,
+        selectedId: p.selectedId,
+        durationSec: p.durationSec,
+        presetIdx: p.presetIdx,
+        paused: p.paused,
+        remaining: Math.max(0, Math.floor(p.remaining)),
+        endsAt: p.endsAt ?? null,
+        pausedSince: p.pausedSince ?? null,
+      };
     }
-    return o as PersistedTimer;
+    if (o.v === 1) {
+      const p = o as Partial<PersistedTimerV1>;
+      if (typeof p.endsAt !== "number" || typeof p.durationSec !== "number")
+        return null;
+      if (typeof p.presetIdx !== "number" || typeof p.selectedId !== "string")
+        return null;
+      if (
+        !Number.isFinite(p.endsAt) ||
+        p.durationSec < MIN_TIMER_SEC ||
+        p.presetIdx < 0 ||
+        p.presetIdx >= PRESETS.length
+      ) {
+        return null;
+      }
+      return {
+        v: 2,
+        selectedId: p.selectedId,
+        durationSec: p.durationSec,
+        presetIdx: p.presetIdx,
+        paused: false,
+        remaining: Math.max(0, Math.ceil((p.endsAt - Date.now()) / 1000)),
+        endsAt: p.endsAt,
+        pausedSince: null,
+      };
+    }
+    return null;
   } catch {
     return null;
   }
 }
 
-function writeTimerStorage(p: PersistedTimer) {
+function tryMigrateLegacyV1Key(): PersistedTimerV2 | null {
+  try {
+    const legacy = localStorage.getItem(LEGACY_TIMER_STORAGE_KEY);
+    if (!legacy) return null;
+    const p = parsePersisted(legacy);
+    if (!p || p.paused || p.endsAt == null) {
+      localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
+      return null;
+    }
+    const left = Math.max(0, Math.ceil((p.endsAt - Date.now()) / 1000));
+    localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
+    if (left <= 0) return null;
+    const record: PersistedTimerV2 = {
+      ...p,
+      remaining: left,
+      paused: false,
+      pausedSince: null,
+    };
+    writeTimerStorage(record);
+    return record;
+  } catch {
+    try {
+      localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+    return null;
+  }
+}
+
+function writeTimerStorage(p: PersistedTimerV2) {
   try {
     localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(p));
   } catch {
@@ -171,13 +286,73 @@ function writeTimerStorage(p: PersistedTimer) {
 function clearTimerStorage() {
   try {
     localStorage.removeItem(TIMER_STORAGE_KEY);
+    localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
   } catch {
     /* ignore */
   }
 }
 
+/** Tell the server when a focus timer is running so friends can see “active” (best-effort). */
+function postFocusStatus(endsAtMs: number | null) {
+  const body =
+    endsAtMs == null
+      ? { endsAt: null }
+      : { endsAt: new Date(endsAtMs).toISOString() };
+  void fetch("/api/me/focus-status", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).catch(() => {});
+}
+
+function parseWorkEntryFromApi(e: {
+  id: string;
+  summary: string;
+  durationSec: number;
+  createdAt: string | Date;
+  workDate: string | Date;
+  project: { name: string; isMisc: boolean };
+  authorLabel?: string;
+  social?: {
+    clapCount: number;
+    clappedByMe: boolean;
+    comments: { authorLabel: string; body: string }[];
+    myComment: string | null;
+  };
+}): WorkEntryRow {
+  return {
+    id: e.id,
+    summary: e.summary,
+    durationSec: e.durationSec,
+    createdAt:
+      typeof e.createdAt === "string"
+        ? e.createdAt
+        : new Date(e.createdAt).toISOString(),
+    workDate:
+      typeof e.workDate === "string"
+        ? e.workDate.slice(0, 10)
+        : new Date(e.workDate).toISOString().slice(0, 10),
+    project: e.project,
+    authorLabel: e.authorLabel,
+    social: e.social,
+  };
+}
+
+type ApiWorkEntry = Parameters<typeof parseWorkEntryFromApi>[0];
+
+type ActivityNotificationRow = {
+  id: string;
+  type: "CLAP" | "COMMENT";
+  readAt: string | null;
+  createdAt: string;
+  actorLabel: string;
+  sessionId: string;
+  sessionSummarySnippet: string;
+};
+
 type ActivityAppProps = {
   initialProjects: Project[];
+  initialArchivedProjects: Project[];
   initialStats: StatsBundle;
   initialWorkEntries: WorkEntryRow[];
   initialFriendFeed: WorkEntryRow[];
@@ -188,6 +363,7 @@ type ActivityAppProps = {
 
 export function ActivityApp({
   initialProjects,
+  initialArchivedProjects,
   initialStats,
   initialWorkEntries,
   initialFriendFeed,
@@ -197,6 +373,9 @@ export function ActivityApp({
 }: ActivityAppProps) {
   const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>(initialProjects);
+  const [archivedProjects, setArchivedProjects] = useState<Project[]>(
+    initialArchivedProjects,
+  );
   const [stats, setStats] = useState<StatsBundle>(initialStats);
   const [selectedId, setSelectedId] = useState(() =>
     defaultSelectedId(initialProjects),
@@ -213,10 +392,13 @@ export function ActivityApp({
   const [goalEdit, setGoalEdit] = useState(false);
   const [goalDraft, setGoalDraft] = useState("7");
   const [arming, setArming] = useState(false);
+  const [paused, setPaused] = useState(false);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const durationSecRef = useRef(durationSec);
   const selectedIdRef = useRef(selectedId);
+  const presetIdxRef = useRef(presetIdx);
+  const pauseNudgeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const completedMeta = useRef<{ projectId: string; durationSec: number } | null>(
     null,
   );
@@ -232,6 +414,12 @@ export function ActivityApp({
     useState<WorkEntryRow[]>(initialWorkEntries);
   const [friendFeed, setFriendFeed] =
     useState<WorkEntryRow[]>(initialFriendFeed);
+  const [notif, setNotif] = useState<{
+    items: ActivityNotificationRow[];
+    unreadCount: number;
+  }>({ items: [], unreadCount: 0 });
+  const [notifOpen, setNotifOpen] = useState(false);
+  const notifPanelRef = useRef<HTMLDivElement | null>(null);
   const [friendsState, setFriendsState] =
     useState<FriendsStatePayload>(initialFriendsState);
   const [handleDraft, setHandleDraft] = useState(
@@ -246,8 +434,8 @@ export function ActivityApp({
   const pendingDiscardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
-  const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+  const [pendingArchiveId, setPendingArchiveId] = useState<string | null>(null);
+  const pendingArchiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const [pendingUnfriendId, setPendingUnfriendId] = useState<string | null>(
@@ -258,42 +446,27 @@ export function ActivityApp({
   );
   const prevIncomingCountRef = useRef(initialFriendsState.incoming.length);
 
+  useEffect(() => {
+    presetIdxRef.current = presetIdx;
+  }, [presetIdx]);
+
   const loadAll = useCallback(async () => {
-    const [pRes, sRes, eRes, fRes, ffRes] = await Promise.all([
+    const [pRes, sRes, eRes, fRes, ffRes, nRes] = await Promise.all([
       fetch("/api/projects"),
       fetch("/api/stats"),
       fetch("/api/entries"),
       fetch("/api/friends"),
       fetch("/api/entries/friends"),
+      fetch("/api/notifications"),
     ]);
     const pJson = await pRes.json();
     const sJson = await sRes.json();
     const eJson = await eRes.json();
     const fJson = (await fRes.json()) as FriendsStatePayload;
     const ffJson = await ffRes.json();
-    const rawEntries = (eJson.entries ?? []) as Array<{
-      id: string;
-      summary: string;
-      durationSec: number;
-      createdAt: string;
-      workDate: string;
-      project: { name: string; isMisc: boolean };
-    }>;
+
     setWorkEntries(
-      rawEntries.map((e) => ({
-        id: e.id,
-        summary: e.summary,
-        durationSec: e.durationSec,
-        createdAt:
-          typeof e.createdAt === "string"
-            ? e.createdAt
-            : new Date(e.createdAt).toISOString(),
-        workDate:
-          typeof e.workDate === "string"
-            ? e.workDate.slice(0, 10)
-            : new Date(e.workDate).toISOString().slice(0, 10),
-        project: e.project,
-      })),
+      (eJson.entries ?? []).map((e: ApiWorkEntry) => parseWorkEntryFromApi(e)),
     );
 
     if (fRes.ok) {
@@ -302,51 +475,38 @@ export function ActivityApp({
     }
 
     if (ffRes.ok) {
-      const rawFriend = (ffJson.entries ?? []) as Array<{
-        id: string;
-        summary: string;
-        durationSec: number;
-        createdAt: string;
-        workDate: string;
-        project: { name: string; isMisc: boolean };
-        authorLabel?: string;
-      }>;
       setFriendFeed(
-        rawFriend.map((e) => ({
-          id: e.id,
-          summary: e.summary,
-          durationSec: e.durationSec,
-          createdAt:
-            typeof e.createdAt === "string"
-              ? e.createdAt
-              : new Date(e.createdAt).toISOString(),
-          workDate:
-            typeof e.workDate === "string"
-              ? e.workDate.slice(0, 10)
-              : new Date(e.workDate).toISOString().slice(0, 10),
-          project: e.project,
-          authorLabel: e.authorLabel,
-        })),
+        (ffJson.entries ?? []).map((e: ApiWorkEntry) =>
+          parseWorkEntryFromApi(e),
+        ),
       );
     }
 
-    setProjects(
-      (pJson.projects ?? []).map(
-        (x: {
-          id: string;
-          name: string;
-          isMisc: boolean;
-          totalSec?: number;
-          lastSessionAt?: string | null;
-        }) => ({
-          id: x.id,
-          name: x.name,
-          isMisc: x.isMisc,
-          totalSec: typeof x.totalSec === "number" ? x.totalSec : 0,
-          lastSessionAt: x.lastSessionAt ?? null,
-        }),
-      ),
-    );
+    if (nRes.ok) {
+      const nJson = await nRes.json();
+      setNotif({
+        items: (nJson.items ?? []) as ActivityNotificationRow[],
+        unreadCount:
+          typeof nJson.unreadCount === "number" ? nJson.unreadCount : 0,
+      });
+    }
+
+    const mapProj = (x: {
+      id: string;
+      name: string;
+      isMisc: boolean;
+      totalSec?: number;
+      lastSessionAt?: string | null;
+    }): Project => ({
+      id: x.id,
+      name: x.name,
+      isMisc: x.isMisc,
+      totalSec: typeof x.totalSec === "number" ? x.totalSec : 0,
+      lastSessionAt: x.lastSessionAt ?? null,
+    });
+
+    setProjects((pJson.projects ?? []).map(mapProj));
+    setArchivedProjects((pJson.archivedProjects ?? []).map(mapProj));
 
     setStats({
       heatmap: sJson.heatmap ?? {},
@@ -367,6 +527,55 @@ export function ActivityApp({
       return misc?.id ?? (pJson.projects?.[0]?.id ?? "");
     });
   }, []);
+
+  const refreshEntryFeeds = useCallback(async () => {
+    const [eRes, ffRes, nRes] = await Promise.all([
+      fetch("/api/entries"),
+      fetch("/api/entries/friends"),
+      fetch("/api/notifications"),
+    ]);
+    const eJson = await eRes.json();
+    const ffJson = await ffRes.json();
+    setWorkEntries(
+      (eJson.entries ?? []).map((e: ApiWorkEntry) => parseWorkEntryFromApi(e)),
+    );
+    if (ffRes.ok) {
+      setFriendFeed(
+        (ffJson.entries ?? []).map((e: ApiWorkEntry) =>
+          parseWorkEntryFromApi(e),
+        ),
+      );
+    }
+    if (nRes.ok) {
+      const nJson = await nRes.json();
+      setNotif({
+        items: (nJson.items ?? []) as ActivityNotificationRow[],
+        unreadCount:
+          typeof nJson.unreadCount === "number" ? nJson.unreadCount : 0,
+      });
+    }
+  }, []);
+
+  async function toggleNotifPanel() {
+    if (notifOpen) {
+      setNotifOpen(false);
+      return;
+    }
+    setNotifOpen(true);
+    await fetch("/api/notifications/mark-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ all: true }),
+    });
+    const nRes = await fetch("/api/notifications");
+    if (nRes.ok) {
+      const nJson = await nRes.json();
+      setNotif({
+        items: (nJson.items ?? []) as ActivityNotificationRow[],
+        unreadCount: 0,
+      });
+    }
+  }
 
   useLayoutEffect(() => {
     if (initialFriendsState.incoming.length > 0) {
@@ -395,16 +604,60 @@ export function ActivityApp({
   }, [friendsState.incoming.length]);
 
   useEffect(() => {
+    if (sidebarTab !== "community") return;
+    const refreshFriends = () => {
+      void (async () => {
+        const res = await fetch("/api/friends");
+        if (!res.ok) return;
+        const j = (await res.json()) as FriendsStatePayload;
+        setFriendsState(j);
+      })();
+    };
+    refreshFriends();
+    const id = setInterval(refreshFriends, 35_000);
+    return () => clearInterval(id);
+  }, [sidebarTab]);
+
+  useEffect(() => {
+    void (async () => {
+      const nRes = await fetch("/api/notifications");
+      if (nRes.ok) {
+        const nJson = await nRes.json();
+        setNotif({
+          items: (nJson.items ?? []) as ActivityNotificationRow[],
+          unreadCount:
+            typeof nJson.unreadCount === "number" ? nJson.unreadCount : 0,
+        });
+      }
+    })();
+  }, []);
+
+  useEffect(() => {
+    if (!notifOpen) return;
+    function onDocMouseDown(ev: MouseEvent) {
+      if (
+        notifPanelRef.current &&
+        !notifPanelRef.current.contains(ev.target as Node)
+      ) {
+        setNotifOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [notifOpen]);
+
+  useEffect(() => {
     return () => {
       if (pendingDiscardTimerRef.current) {
         clearTimeout(pendingDiscardTimerRef.current);
       }
-      if (pendingDeleteTimerRef.current) {
-        clearTimeout(pendingDeleteTimerRef.current);
+      if (pendingArchiveTimerRef.current) {
+        clearTimeout(pendingArchiveTimerRef.current);
       }
       if (pendingUnfriendTimerRef.current) {
         clearTimeout(pendingUnfriendTimerRef.current);
       }
+      clearPauseNudge();
     };
   }, []);
 
@@ -433,6 +686,26 @@ export function ActivityApp({
     }
   }
 
+  function clearPauseNudge() {
+    if (pauseNudgeTimerRef.current != null) {
+      clearTimeout(pauseNudgeTimerRef.current);
+      pauseNudgeTimerRef.current = null;
+    }
+  }
+
+  function schedulePauseNudge(pausedSince: number) {
+    clearPauseNudge();
+    const delay = Math.max(0, PAUSE_NUDGE_MS - (Date.now() - pausedSince));
+    pauseNudgeTimerRef.current = setTimeout(() => {
+      pauseNudgeTimerRef.current = null;
+      notifyTimerPausedLong();
+      setDashNotice({
+        text: "Still there? Your timer is paused — tap Resume when you’re back.",
+        kind: "info",
+      });
+    }, delay);
+  }
+
   const syncFromEndTime = useCallback((playSoundOnComplete: boolean) => {
     const end = timerEndsAtRef.current;
     if (end == null) return;
@@ -448,6 +721,8 @@ export function ActivityApp({
     }
     clearTimerStorage();
     setRunning(false);
+    setPaused(false);
+    clearPauseNudge();
     const pid = selectedIdRef.current;
     const dur = durationSecRef.current;
     completedMeta.current = { projectId: pid, durationSec: dur };
@@ -458,6 +733,7 @@ export function ActivityApp({
     });
     setShowSave(true);
     setRemaining(0);
+    postFocusStatus(null);
     if (playSoundOnComplete) void playTimerCompleteRing();
     if (playSoundOnComplete) notifyTimerComplete();
   }, []);
@@ -468,25 +744,57 @@ export function ActivityApp({
   useLayoutEffect(() => {
     if (timerHydratedRef.current) return;
     timerHydratedRef.current = true;
-    const p = parsePersisted(localStorage.getItem(TIMER_STORAGE_KEY));
+    const raw = localStorage.getItem(TIMER_STORAGE_KEY);
+    let p = parsePersisted(raw);
+    if (!p) p = tryMigrateLegacyV1Key();
     if (!p) return;
+
     if (!initialProjects.some((x) => x.id === p.selectedId)) {
       clearTimerStorage();
       return;
     }
     durationSecRef.current = p.durationSec;
     selectedIdRef.current = p.selectedId;
-    timerEndsAtRef.current = p.endsAt;
+    presetIdxRef.current = p.presetIdx;
     setDurationSec(p.durationSec);
     setPresetIdx(p.presetIdx);
     setSelectedId(p.selectedId);
 
+    if (p.paused) {
+      const rem = Math.min(p.remaining, p.durationSec);
+      timerEndsAtRef.current = null;
+      setRemaining(rem);
+      setRunning(true);
+      setPaused(true);
+      postFocusStatus(null);
+      const since = p.pausedSince ?? Date.now();
+      schedulePauseNudge(since);
+      writeTimerStorage({
+        v: 2,
+        selectedId: p.selectedId,
+        durationSec: p.durationSec,
+        presetIdx: p.presetIdx,
+        paused: true,
+        remaining: rem,
+        endsAt: null,
+        pausedSince: since,
+      });
+      return;
+    }
+
+    if (p.endsAt == null) {
+      clearTimerStorage();
+      return;
+    }
+
+    timerEndsAtRef.current = p.endsAt;
     const left = Math.max(0, Math.ceil((p.endsAt - Date.now()) / 1000));
     if (left <= 0) {
       timerEndsAtRef.current = null;
       clearTimerStorage();
       setRemaining(0);
       setRunning(false);
+      setPaused(false);
       completedMeta.current = {
         projectId: p.selectedId,
         durationSec: p.durationSec,
@@ -501,11 +809,23 @@ export function ActivityApp({
     }
     setRemaining(left);
     setRunning(true);
+    setPaused(false);
+    postFocusStatus(p.endsAt);
+    writeTimerStorage({
+      v: 2,
+      selectedId: p.selectedId,
+      durationSec: p.durationSec,
+      presetIdx: p.presetIdx,
+      paused: false,
+      remaining: left,
+      endsAt: p.endsAt,
+      pausedSince: null,
+    });
   }, [initialProjects]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
-    if (!running) return;
+    if (!running || paused) return;
     const tick = () => {
       syncFromEndTime(true);
     };
@@ -515,10 +835,10 @@ export function ActivityApp({
     return () => {
       clearTick();
     };
-  }, [running, syncFromEndTime]);
+  }, [running, paused, syncFromEndTime]);
 
   useEffect(() => {
-    if (!running) return;
+    if (!running || paused) return;
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         syncFromEndTime(true);
@@ -533,14 +853,72 @@ export function ActivityApp({
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
     };
-  }, [running, syncFromEndTime]);
+  }, [running, paused, syncFromEndTime]);
 
   function applyPreset(idx: number) {
     if (running || arming) return;
     setPresetIdx(idx);
-    const sec = PRESETS[idx].seconds;
+    const sec = clampDurationSec(PRESETS[idx].seconds);
     setDurationSec(sec);
     setRemaining(sec);
+  }
+
+  function applyCustomHoursMinutes(h: number, m: number) {
+    if (running || arming) return;
+    const H = Math.min(24, Math.max(0, Math.floor(Number.isFinite(h) ? h : 0)));
+    const M = Math.min(59, Math.max(0, Math.floor(Number.isFinite(m) ? m : 0)));
+    const total = clampDurationSec(H * 3600 + M * 60);
+    setPresetIdx(presetIdxForDuration(total));
+    setDurationSec(total);
+    setRemaining(total);
+  }
+
+  function pauseSession() {
+    if (!running || paused || arming) return;
+    clearTick();
+    timerEndsAtRef.current = null;
+    const rem = remainingRef.current;
+    const since = Date.now();
+    setPaused(true);
+    requestTimerNotifyPermissionIfNeeded();
+    writeTimerStorage({
+      v: 2,
+      selectedId: selectedIdRef.current,
+      durationSec: durationSecRef.current,
+      presetIdx: presetIdxRef.current,
+      paused: true,
+      remaining: rem,
+      endsAt: null,
+      pausedSince: since,
+    });
+    postFocusStatus(null);
+    schedulePauseNudge(since);
+  }
+
+  async function resumeTimer() {
+    if (!running || !paused || arming) return;
+    setArming(true);
+    try {
+      const rem = remainingRef.current;
+      const endsAt = Date.now() + rem * 1000;
+      timerEndsAtRef.current = endsAt;
+      setPaused(false);
+      clearPauseNudge();
+      writeTimerStorage({
+        v: 2,
+        selectedId: selectedIdRef.current,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: false,
+        remaining: rem,
+        endsAt,
+        pausedSince: null,
+      });
+      postFocusStatus(endsAt);
+      setRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+    } finally {
+      setArming(false);
+    }
   }
 
   async function startTimer() {
@@ -569,13 +947,19 @@ export function ActivityApp({
       timerEndsAtRef.current = endsAt;
       setRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
       setRunning(true);
+      setPaused(false);
+      clearPauseNudge();
       writeTimerStorage({
-        v: 1,
-        endsAt,
+        v: 2,
+        selectedId: sid,
         durationSec: dur,
         presetIdx: capturedPresetIdx,
-        selectedId: sid,
+        paused: false,
+        remaining: Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)),
+        endsAt,
+        pausedSince: null,
       });
+      postFocusStatus(endsAt);
     } finally {
       setArming(false);
     }
@@ -618,7 +1002,10 @@ export function ActivityApp({
     timerEndsAtRef.current = null;
     clearTimerStorage();
     setRunning(false);
+    setPaused(false);
+    clearPauseNudge();
     setRemaining(durationSecRef.current);
+    postFocusStatus(null);
   }
 
   function stopAndLogSession() {
@@ -640,7 +1027,10 @@ export function ActivityApp({
       timerEndsAtRef.current = null;
       clearTimerStorage();
       setRunning(false);
+      setPaused(false);
+      clearPauseNudge();
       setRemaining(total);
+      postFocusStatus(null);
       setDashNotice({
         text: "No time on the clock yet — start the timer or tap Discard.",
         kind: "error",
@@ -651,6 +1041,9 @@ export function ActivityApp({
     timerEndsAtRef.current = null;
     clearTimerStorage();
     setRunning(false);
+    setPaused(false);
+    clearPauseNudge();
+    postFocusStatus(null);
     const logged = durationSecToStore(rawElapsed);
     completedMeta.current = {
       projectId: selectedIdRef.current,
@@ -716,32 +1109,48 @@ export function ActivityApp({
     void loadAll();
   }
 
-  async function deleteProject(id: string) {
+  async function archiveFocusArea(id: string) {
     if (running || arming) return;
-    if (pendingDeleteId !== id) {
-      if (pendingDeleteTimerRef.current) {
-        clearTimeout(pendingDeleteTimerRef.current);
+    if (pendingArchiveId !== id) {
+      if (pendingArchiveTimerRef.current) {
+        clearTimeout(pendingArchiveTimerRef.current);
       }
-      setPendingDeleteId(id);
+      setPendingArchiveId(id);
       setDashNotice({
-        text: "Tap the trash icon again to permanently delete this focus area and its history.",
+        text: "Tap the archive icon again to hide this focus area from the timer. Your logged time and activity history stay put.",
         kind: "info",
       });
-      pendingDeleteTimerRef.current = setTimeout(() => {
-        setPendingDeleteId(null);
-        pendingDeleteTimerRef.current = null;
+      pendingArchiveTimerRef.current = setTimeout(() => {
+        setPendingArchiveId(null);
+        pendingArchiveTimerRef.current = null;
       }, 5000);
       return;
     }
-    if (pendingDeleteTimerRef.current) {
-      clearTimeout(pendingDeleteTimerRef.current);
-      pendingDeleteTimerRef.current = null;
+    if (pendingArchiveTimerRef.current) {
+      clearTimeout(pendingArchiveTimerRef.current);
+      pendingArchiveTimerRef.current = null;
     }
-    setPendingDeleteId(null);
+    setPendingArchiveId(null);
     setDashNotice(null);
     const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
     if (!res.ok) {
-      setDashNotice({ text: "Could not remove this focus area.", kind: "error" });
+      setDashNotice({
+        text: "Could not archive this focus area.",
+        kind: "error",
+      });
+      return;
+    }
+    void loadAll();
+  }
+
+  async function restoreArchivedProject(id: string) {
+    if (running || arming) return;
+    const res = await fetch(`/api/projects/${id}/restore`, { method: "POST" });
+    if (!res.ok) {
+      setDashNotice({
+        text: "Could not restore this focus area.",
+        kind: "error",
+      });
       return;
     }
     void loadAll();
@@ -749,6 +1158,7 @@ export function ActivityApp({
 
   async function logout() {
     clearTick();
+    clearPauseNudge();
     timerEndsAtRef.current = null;
     clearTimerStorage();
     await fetch("/api/auth/logout", { method: "POST" });
@@ -757,6 +1167,7 @@ export function ActivityApp({
 
   const progress = durationSec > 0 ? 1 - remaining / durationSec : 0;
   const circ = 2 * Math.PI * 44;
+  const customHm = splitHoursMinutes(durationSec);
 
   const totalLabel = stats
     ? `Total: ${Math.floor(stats.totalMinutesYear / 60)}h ${stats.totalMinutesYear % 60}m`
@@ -1075,6 +1486,58 @@ export function ActivityApp({
               {stats?.sessionCount ?? 0}
             </span>
           </div>
+          <div className="relative" ref={notifPanelRef}>
+            <button
+              type="button"
+              onClick={() => void toggleNotifPanel()}
+              className="relative inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2.5 py-2 text-[var(--foreground)] active:opacity-90"
+              aria-expanded={notifOpen}
+              aria-label="Activity notifications"
+            >
+              <Bell className="h-4 w-4 shrink-0" />
+              {notif.unreadCount > 0 ? (
+                <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-[var(--app-accent)] px-1 text-[10px] font-bold text-white tabular-nums">
+                  {notif.unreadCount > 9 ? "9+" : notif.unreadCount}
+                </span>
+              ) : null}
+            </button>
+            {notifOpen ? (
+              <div
+                className="absolute right-0 z-50 mt-2 w-[min(calc(100vw-2rem),20rem)] rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-2 shadow-xl shadow-black/20"
+                role="dialog"
+                aria-label="Notifications"
+              >
+                <p className="border-b border-[var(--app-border)] px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                  Reactions on your activity
+                </p>
+                {notif.items.length === 0 ? (
+                  <p className="px-2 py-6 text-center text-sm text-[var(--app-muted)]">
+                    Nothing yet — when friends clap or comment, it shows up
+                    here.
+                  </p>
+                ) : (
+                  <ul className="max-h-80 overflow-y-auto py-1">
+                    {notif.items.map((n) => (
+                      <li
+                        key={n.id}
+                        className="rounded-lg px-2 py-2 text-sm leading-snug text-[var(--foreground)] hover:bg-[var(--background)]/60"
+                      >
+                        <span className="font-medium">{n.actorLabel}</span>{" "}
+                        {n.type === "CLAP"
+                          ? "clapped your activity"
+                          : "commented on your activity"}
+                        {n.sessionSummarySnippet ? (
+                          <span className="mt-0.5 block text-xs text-[var(--app-muted)]">
+                            “{n.sessionSummarySnippet}”
+                          </span>
+                        ) : null}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+            ) : null}
+          </div>
           <ThemeToggle />
           <button
             type="button"
@@ -1186,7 +1649,11 @@ export function ActivityApp({
               )}
             </div>
 
-            <ul className="mt-3 space-y-1 border-t border-[var(--app-border)] pt-3">
+            <p className="mt-3 text-[10px] text-[var(--app-muted)]">
+              Archive removes an area from the timer only — your streak, weekly
+              progress, and activity feed stay intact.
+            </p>
+            <ul className="mt-2 space-y-1 border-t border-[var(--app-border)] pt-3">
               {projects
                 .filter((p) => !p.isMisc)
                 .map((p) => (
@@ -1198,19 +1665,50 @@ export function ActivityApp({
                     <button
                       type="button"
                       disabled={running || arming}
-                      title="Delete focus area"
-                      onClick={() => void deleteProject(p.id)}
-                      className={`shrink-0 rounded p-1.5 text-[var(--app-muted)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40 ${
-                        pendingDeleteId === p.id
+                      title="Archive focus area (keeps your history)"
+                      onClick={() => void archiveFocusArea(p.id)}
+                      className={`shrink-0 rounded p-1.5 text-[var(--app-muted)] hover:bg-amber-500/10 hover:text-amber-600 dark:hover:text-amber-400 disabled:opacity-40 ${
+                        pendingArchiveId === p.id
                           ? "ring-2 ring-[var(--app-accent)] ring-offset-2 ring-offset-[var(--app-surface-card)]"
                           : ""
                       }`}
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Archive className="h-3.5 w-3.5" />
                     </button>
                   </li>
                 ))}
             </ul>
+
+            {archivedProjects.length > 0 ? (
+              <div className="mt-4 border-t border-[var(--app-border)] pt-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                  Archived
+                </p>
+                <p className="mt-1 text-[10px] text-[var(--app-muted)]">
+                  Restore anytime — all past sessions and stats still count.
+                </p>
+                <ul className="mt-2 space-y-1.5">
+                  {archivedProjects.map((p) => (
+                    <li
+                      key={`arc-${p.id}`}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-[var(--app-border)]/70 bg-[var(--background)]/35 px-2 py-1.5 text-xs"
+                    >
+                      <span className="truncate text-[var(--app-muted)]">
+                        {p.name}
+                      </span>
+                      <button
+                        type="button"
+                        disabled={running || arming}
+                        onClick={() => void restoreArchivedProject(p.id)}
+                        className="shrink-0 rounded-md border border-[var(--app-border)] px-2 py-1 text-[10px] font-medium text-[var(--foreground)] hover:bg-[var(--background)] disabled:opacity-40"
+                      >
+                        Restore
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
           </div>
         </aside>
 
@@ -1258,8 +1756,14 @@ export function ActivityApp({
                     {arming ? "…" : formatClock(remaining)}
                   </div>
                   {running ? (
-                    <span className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--app-accent)] sm:text-xs">
-                      In progress
+                    <span
+                      className={`mt-0.5 text-[10px] font-medium uppercase tracking-wider sm:text-xs ${
+                        paused
+                          ? "text-amber-600 dark:text-amber-400"
+                          : "text-[var(--app-accent)]"
+                      }`}
+                    >
+                      {paused ? "Paused" : "In progress"}
                     </span>
                   ) : null}
                   <Clock className="mt-1 h-4 w-4 text-[var(--app-muted)]" />
@@ -1303,6 +1807,57 @@ export function ActivityApp({
               ))}
             </div>
 
+            <div className="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--background)]/30 p-3 sm:p-4">
+              <label className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">
+                Custom length
+              </label>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={24}
+                  disabled={running || arming}
+                  aria-label="Hours"
+                  className="min-h-11 w-[4.5rem] rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-2 py-2 text-center text-base tabular-nums text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2 disabled:opacity-50"
+                  value={customHm.h}
+                  onChange={(e) =>
+                    applyCustomHoursMinutes(
+                      parseInt(e.target.value, 10) || 0,
+                      customHm.m,
+                    )
+                  }
+                />
+                <span className="text-sm text-[var(--app-muted)]">h</span>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={0}
+                  max={59}
+                  disabled={running || arming}
+                  aria-label="Minutes"
+                  className="min-h-11 w-[4.5rem] rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-2 py-2 text-center text-base tabular-nums text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2 disabled:opacity-50"
+                  value={customHm.m}
+                  onChange={(e) =>
+                    applyCustomHoursMinutes(
+                      customHm.h,
+                      parseInt(e.target.value, 10) || 0,
+                    )
+                  }
+                />
+                <span className="text-sm text-[var(--app-muted)]">m</span>
+                {presetIdx === CUSTOM_PRESET_IDX && !(running || arming) ? (
+                  <span className="ml-auto text-[10px] font-medium uppercase tracking-wide text-[var(--app-accent)]">
+                    Custom
+                  </span>
+                ) : null}
+              </div>
+              <p className="mt-2 text-[10px] leading-snug text-[var(--app-muted)] sm:text-[11px]">
+                Between {MIN_TIMER_SEC / 60} minute and {MAX_TIMER_SEC / 3600}{" "}
+                hours. Values are clipped to that range.
+              </p>
+            </div>
+
             {!running ? (
               <button
                 type="button"
@@ -1314,33 +1869,56 @@ export function ActivityApp({
                 {arming ? "Get ready…" : "Start session"}
               </button>
             ) : (
-              <div className="mt-5 flex flex-col gap-2 sm:flex-row">
+              <div className="mt-5 flex flex-col gap-2">
                 <button
                   type="button"
-                  onClick={() => stopAndLogSession()}
-                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--app-accent)] py-3.5 text-sm font-medium text-white shadow-lg shadow-[var(--app-accent)]/25 active:scale-[0.99]"
+                  disabled={arming}
+                  onClick={() =>
+                    paused ? void resumeTimer() : pauseSession()
+                  }
+                  className="flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 py-3.5 text-sm font-medium text-[var(--foreground)] active:scale-[0.99] disabled:opacity-50"
                 >
-                  Stop &amp; log
+                  {paused ? (
+                    <>
+                      <Play className="h-4 w-4 shrink-0 fill-current" />
+                      {arming ? "…" : "Resume"}
+                    </>
+                  ) : (
+                    <>
+                      <Pause className="h-4 w-4 shrink-0" />
+                      Pause
+                    </>
+                  )}
                 </button>
-                <button
-                  type="button"
-                  onClick={() => onDiscardTap()}
-                  className={`flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-medium active:opacity-90 ${
-                    pendingDiscard
-                      ? "border-[var(--app-accent)] bg-[var(--app-accent-muted)] text-[var(--foreground)]"
-                      : "border-[var(--app-border)] bg-[var(--background)]/50 text-[var(--foreground)]"
-                  }`}
-                >
-                  <RotateCcw className="h-4 w-4 shrink-0" />
-                  {pendingDiscard ? "Tap again to discard" : "Discard"}
-                </button>
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <button
+                    type="button"
+                    onClick={() => stopAndLogSession()}
+                    className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--app-accent)] py-3.5 text-sm font-medium text-white shadow-lg shadow-[var(--app-accent)]/25 active:scale-[0.99]"
+                  >
+                    Stop &amp; log
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDiscardTap()}
+                    className={`flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-medium active:opacity-90 ${
+                      pendingDiscard
+                        ? "border-[var(--app-accent)] bg-[var(--app-accent-muted)] text-[var(--foreground)]"
+                        : "border-[var(--app-border)] bg-[var(--background)]/50 text-[var(--foreground)]"
+                    }`}
+                  >
+                    <RotateCcw className="h-4 w-4 shrink-0" />
+                    {pendingDiscard ? "Tap again to discard" : "Discard"}
+                  </button>
+                </div>
               </div>
             )}
 
             <p className="mt-3 text-center text-[10px] leading-snug text-[var(--app-muted)] sm:text-[11px]">
-              On your phone: turn the volume up. When time&apos;s up you&apos;ll
-              hear a chime and feel a short vibration; if your browser asks to show
-              notifications, allowing that helps when the tab is in the background.
+              Pause anytime; after 5 minutes paused we&apos;ll nudge you (in the
+              app and via notification if you allowed it). On your phone: turn the
+              volume up — when time&apos;s up you&apos;ll hear a chime and a short
+              vibration.
             </p>
           </div>
 
@@ -1499,6 +2077,7 @@ export function ActivityApp({
               <WorkEntriesFeed
                 entries={workEntries}
                 displayName={displayName}
+                variant="you"
                 title="Your activity"
                 subtitle="Newest entries — your accountability trail."
                 emptyMessage="Finish a focus block and log it to see entries here."
@@ -1672,35 +2251,60 @@ export function ActivityApp({
                       Your friends
                     </p>
                     <ul className="mt-2 space-y-2">
-                      {friendsState.friends.map((f) => (
+                      {friendsState.friends.map((f) => {
+                        const leftLabel = f.activeFocusEndsAt
+                          ? focusMinutesLeftLabel(f.activeFocusEndsAt)
+                          : "";
+                        return (
                         <li
                           key={f.userId}
-                          className="flex items-center justify-between gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
+                          className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
                         >
-                          <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
-                            {f.label}
-                            {f.handle ? (
-                              <span className="text-[var(--app-muted)]">
-                                {" "}
-                                · @{f.handle}
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
+                              {f.label}
+                              {f.handle ? (
+                                <span className="text-[var(--app-muted)]">
+                                  {" "}
+                                  · @{f.handle}
+                                </span>
+                              ) : null}
+                            </span>
+                            <button
+                              type="button"
+                              className={`shrink-0 text-xs underline ${
+                                pendingUnfriendId === f.userId
+                                  ? "font-semibold text-[var(--app-accent)]"
+                                  : "text-[var(--app-muted)]"
+                              }`}
+                              onClick={() => void removeFriend(f.userId)}
+                            >
+                              {pendingUnfriendId === f.userId
+                                ? "Tap again to remove"
+                                : "Remove"}
+                            </button>
+                          </div>
+                          {f.activeFocusEndsAt ? (
+                            <div className="flex items-start gap-2 rounded-md bg-[var(--app-surface-card)]/80 px-2 py-1.5 text-xs text-[var(--app-muted)]">
+                              <span
+                                className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"
+                                aria-hidden
+                              />
+                              <span className="min-w-0 leading-snug">
+                                <span className="text-[var(--foreground)]/90">
+                                  {focusQuipForUser(f.userId)}
+                                </span>
+                                {leftLabel ? (
+                                  <span className="mt-0.5 block text-[var(--app-muted)] sm:mt-0 sm:ml-1 sm:inline">
+                                    {leftLabel}
+                                  </span>
+                                ) : null}
                               </span>
-                            ) : null}
-                          </span>
-                          <button
-                            type="button"
-                            className={`shrink-0 text-xs underline ${
-                              pendingUnfriendId === f.userId
-                                ? "font-semibold text-[var(--app-accent)]"
-                                : "text-[var(--app-muted)]"
-                            }`}
-                            onClick={() => void removeFriend(f.userId)}
-                          >
-                            {pendingUnfriendId === f.userId
-                              ? "Tap again to remove"
-                              : "Remove"}
-                          </button>
+                            </div>
+                          ) : null}
                         </li>
-                      ))}
+                        );
+                      })}
                     </ul>
                   </div>
                 ) : null}
@@ -1718,8 +2322,10 @@ export function ActivityApp({
                 <WorkEntriesFeed
                   entries={friendFeed}
                   displayName=""
+                  variant="friend"
+                  onRefresh={refreshEntryFeeds}
                   title="Friends&apos; activity"
-                  subtitle="What they logged during their focus blocks."
+                  subtitle="Clap or leave a note on their sessions — they&apos;ll see it in notifications."
                   emptyMessage={
                     friendsState.friends.length === 0
                       ? "Add a friend above to see their activity here."

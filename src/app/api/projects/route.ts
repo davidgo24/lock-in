@@ -11,10 +11,16 @@ export async function GET() {
 
   await ensureDefaultData(userId);
 
-  const projects = await prisma.project.findMany({
-    where: { userId },
-    orderBy: [{ isMisc: "desc" }, { name: "asc" }],
-  });
+  const [projects, archivedProjects] = await Promise.all([
+    prisma.project.findMany({
+      where: { userId, archivedAt: null },
+      orderBy: [{ isMisc: "desc" }, { name: "asc" }],
+    }),
+    prisma.project.findMany({
+      where: { userId, archivedAt: { not: null } },
+      orderBy: { name: "asc" },
+    }),
+  ]);
 
   const [totals, lastSessions] = await Promise.all([
     prisma.activitySession.groupBy({
@@ -36,14 +42,17 @@ export async function GET() {
     lastSessions.map((t) => [t.projectId, t._max.createdAt]),
   );
 
+  const mapProject = (p: (typeof projects)[0]) => ({
+    id: p.id,
+    name: p.name,
+    isMisc: p.isMisc,
+    totalSec: totalMap[p.id] ?? 0,
+    lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
+  });
+
   return NextResponse.json({
-    projects: projects.map((p) => ({
-      id: p.id,
-      name: p.name,
-      isMisc: p.isMisc,
-      totalSec: totalMap[p.id] ?? 0,
-      lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
-    })),
+    projects: projects.map(mapProject),
+    archivedProjects: archivedProjects.map(mapProject),
   });
 }
 

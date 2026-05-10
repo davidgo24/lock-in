@@ -22,3 +22,17 @@ export function notifyTimerComplete(): void {
     /* ignored */
   }
 }
+
+/** Gentle nudge when the user has left the timer paused for a long time. */
+export function notifyTimerPausedLong(): void {
+  if (typeof Notification === "undefined") return;
+  if (Notification.permission !== "granted") return;
+  try {
+    new Notification("Still focusing?", {
+      body: "Your session has been paused for a while. Resume when you’re ready.",
+      tag: "focus-timer-pause-nudge",
+    });
+  } catch {
+    /* ignored */
+  }
+}

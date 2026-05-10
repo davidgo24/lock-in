@@ -13,8 +13,10 @@ model User {
   passwordHash String
   displayName  String?
   /// Lowercase unique @handle without the @ (3–30 chars [a-z0-9_], set via API).
-  handle       String?   @unique
-  createdAt    DateTime  @default(now())
+  handle            String?   @unique
+  /// When set and in the future, friends may show “in focus” (synced while a timer is running).
+  activeFocusEndsAt DateTime?
+  createdAt         DateTime  @default(now())
   projects     Project[]
   settings     AppSettings?
 
@@ -22,6 +24,15 @@ model User {
   receivedFriendRequests FriendRequest[] @relation("FriendRequestTo")
   friendshipsAsA         Friendship[]    @relation("FriendshipUserA")
   friendshipsAsB         Friendship[]    @relation("FriendshipUserB")
+  activityClaps          ActivityClap[]
+  activityComments       ActivityComment[]
+  notificationsReceived  ActivityNotification[] @relation("ActivityNotifRecipient")
+  notificationsAsActor   ActivityNotification[] @relation("ActivityNotifActor")
+}
+
+enum ActivityNotificationType {
+  CLAP
+  COMMENT
 }
 
 /// Pending invite — mutual friendship created only after `toUser` accepts.
@@ -62,12 +73,15 @@ model Project {
   user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   isMisc    Boolean           @default(false)
+  /// When set, hidden from timer picker; sessions and stats are kept.
+  archivedAt DateTime?
   createdAt DateTime          @default(now())
   sessions  ActivitySession[]
 
   @@index([userId])
   @@index([isMisc])
   @@index([userId, isMisc])
+  @@index([userId, archivedAt])
 }
 
 model ActivitySession {
@@ -80,7 +94,53 @@ model ActivitySession {
   /// Calendar day for heatmap (Postgres DATE)
   workDate    DateTime @db.Date
   createdAt   DateTime @default(now())
+  claps       ActivityClap[]
+  comments    ActivityComment[]
+  notifications ActivityNotification[]
 
   @@index([workDate])
   @@index([projectId])
+}
+
+/// One clap per user per session (friend activity).
+model ActivityClap {
+  sessionId String
+  userId    String
+  session   ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+
+  @@id([sessionId, userId])
+  @@index([userId])
+}
+
+/// At most one comment per friend per session.
+model ActivityComment {
+  id        String          @id @default(cuid())
+  sessionId String
+  userId    String
+  body      String
+  session   ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+
+  @@unique([sessionId, userId])
+  @@index([sessionId])
+}
+
+model ActivityNotification {
+  id          String                   @id @default(cuid())
+  recipientId String
+  actorId     String
+  type        ActivityNotificationType
+  sessionId   String
+  readAt      DateTime?
+  createdAt   DateTime                 @default(now())
+  recipient   User                     @relation("ActivityNotifRecipient", fields: [recipientId], references: [id], onDelete: Cascade)
+  actor       User                     @relation("ActivityNotifActor", fields: [actorId], references: [id], onDelete: Cascade)
+  session     ActivitySession          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, readAt])
+  @@index([recipientId, createdAt])
 }

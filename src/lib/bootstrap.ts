@@ -9,7 +9,7 @@ export async function ensureDefaultData(userId: string) {
   });
 
   const misc = await prisma.project.findFirst({
-    where: { userId, isMisc: true },
+    where: { userId, isMisc: true, archivedAt: null },
   });
   if (!misc) {
     await prisma.project.create({
