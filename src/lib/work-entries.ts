@@ -14,8 +14,11 @@ export type RecentWorkEntryRow = Prisma.ActivitySessionGetPayload<{
   select: typeof workEntrySelect;
 }>;
 
-export async function getRecentWorkEntries(): Promise<RecentWorkEntryRow[]> {
+export async function getRecentWorkEntries(
+  userId: string,
+): Promise<RecentWorkEntryRow[]> {
   return prisma.activitySession.findMany({
+    where: { project: { userId } },
     take: 50,
     orderBy: { createdAt: "desc" },
     select: workEntrySelect,

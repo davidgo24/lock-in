@@ -10,6 +10,7 @@ import {
 import {
   Clock,
   Flame,
+  Folder,
   LogOut,
   Play,
   Plus,
@@ -28,7 +29,45 @@ import {
 } from "@/lib/sounds";
 import type { StatsBundle } from "@/lib/stats";
 
-type Project = { id: string; name: string; isMisc: boolean };
+type Project = {
+  id: string;
+  name: string;
+  isMisc: boolean;
+  totalSec?: number;
+  lastSessionAt?: string | null;
+};
+
+function projectHue(name: string): number {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) | 0;
+  return Math.abs(h) % 360;
+}
+
+function formatProjectTotal(sec: number): string {
+  if (sec <= 0) return "No time yet";
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  if (h > 0) return `${h}h ${m}m total`;
+  return `${m}m total`;
+}
+
+function formatWeeklyHoursLine(minutes: number): string {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  return `${m}m`;
+}
+
+function formatRelativeShort(iso: string | null | undefined): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  const s = Math.round((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  if (s < 604800) return `${Math.round(s / 86400)}d ago`;
+  return "a while ago";
+}
 
 const PRESETS = [
   { label: "30m", seconds: 30 * 60 },
@@ -114,18 +153,16 @@ type ActivityAppProps = {
   initialProjects: Project[];
   initialStats: StatsBundle;
   initialWorkEntries: WorkEntryRow[];
+  displayName: string;
+  appName: string;
 };
-
-const DISPLAY_NAME =
-  typeof process.env.NEXT_PUBLIC_DISPLAY_NAME === "string" &&
-  process.env.NEXT_PUBLIC_DISPLAY_NAME.trim() !== ""
-    ? process.env.NEXT_PUBLIC_DISPLAY_NAME.trim()
-    : "You";
 
 export function ActivityApp({
   initialProjects,
   initialStats,
   initialWorkEntries,
+  displayName,
+  appName,
 }: ActivityAppProps) {
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [stats, setStats] = useState<StatsBundle>(initialStats);
@@ -171,18 +208,6 @@ export function ActivityApp({
     const pJson = await pRes.json();
     const sJson = await sRes.json();
     const eJson = await eRes.json();
-    setProjects(pJson.projects ?? []);
-
-    setStats({
-      heatmap: sJson.heatmap ?? {},
-      heatmapRangeStart: sJson.heatmapRangeStart ?? localYmdFromDate(new Date()),
-      totalMinutesYear: sJson.totalMinutesYear ?? 0,
-      streak: sJson.streak ?? 0,
-      sessionCount: sJson.sessionCount ?? 0,
-      weeklyLoggedMinutes: sJson.weeklyLoggedMinutes ?? 0,
-      weeklyGoalHours: sJson.weeklyGoalHours ?? 7,
-    });
-
     const rawEntries = (eJson.entries ?? []) as Array<{
       id: string;
       summary: string;
@@ -207,6 +232,35 @@ export function ActivityApp({
         project: e.project,
       })),
     );
+
+    setProjects(
+      (pJson.projects ?? []).map(
+        (x: {
+          id: string;
+          name: string;
+          isMisc: boolean;
+          totalSec?: number;
+          lastSessionAt?: string | null;
+        }) => ({
+          id: x.id,
+          name: x.name,
+          isMisc: x.isMisc,
+          totalSec: typeof x.totalSec === "number" ? x.totalSec : 0,
+          lastSessionAt: x.lastSessionAt ?? null,
+        }),
+      ),
+    );
+
+    setStats({
+      heatmap: sJson.heatmap ?? {},
+      heatmapRangeStart: sJson.heatmapRangeStart ?? localYmdFromDate(new Date()),
+      totalMinutesYear: sJson.totalMinutesYear ?? 0,
+      streak: sJson.streak ?? 0,
+      sessionCount: sJson.sessionCount ?? 0,
+      weeklyLoggedMinutes: sJson.weeklyLoggedMinutes ?? 0,
+      weeklyGoalHours: sJson.weeklyGoalHours ?? 7,
+      activeProjectsCount: sJson.activeProjectsCount ?? 1,
+    });
 
     setSelectedId((prev) => {
       if (prev && (pJson.projects ?? []).some((x: Project) => x.id === prev)) {
@@ -510,16 +564,30 @@ export function ActivityApp({
       ? projects.find((p) => p.id === saveProjectId)
       : undefined;
 
+  const selectedProject = projects.find((p) => p.id === selectedId);
+
+  function copyAppLink() {
+    const url = typeof window !== "undefined" ? window.location.origin : "";
+    void navigator.clipboard.writeText(url).then(
+      () => {
+        alert("App link copied — share it with your crew.");
+      },
+      () => {
+        alert(url);
+      },
+    );
+  }
+
   if (showSave && !saveProject) {
     return (
       <div className="mx-auto flex min-h-dvh max-w-xl flex-col px-4 py-8 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <p className="text-sm text-slate-400">
+        <p className="text-sm text-[var(--app-muted)]">
           This project is no longer available. Discard and return to the
           dashboard.
         </p>
         <button
           type="button"
-          className="mt-4 min-h-11 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white active:scale-[0.99]"
+          className="mt-4 min-h-11 rounded-xl bg-[var(--app-accent)] px-4 py-2.5 text-sm font-medium text-white active:scale-[0.99]"
           onClick={() => {
             setShowSave(false);
             setSaveProjectId(null);
@@ -540,42 +608,44 @@ export function ActivityApp({
         <header className="mb-6 sm:mb-8">
           <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">
-                My Activity
+              <h1 className="font-display text-2xl tracking-tight text-[var(--foreground)] sm:text-3xl">
+                Log this sesh
               </h1>
-              <p className="mt-1 text-sm text-slate-400 sm:text-base">
-                Track progress and see your activity
+              <p className="mt-1 text-sm text-[var(--app-muted)] sm:text-base">
+                Note what you shipped — that&apos;s your proof.
               </p>
             </div>
             <button
               type="button"
               onClick={() => void logout()}
-              className="min-h-11 shrink-0 rounded-lg border border-blue-500/25 bg-slate-900/50 px-3 py-2.5 text-sm text-slate-300 active:bg-slate-800"
+              className="min-h-11 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2.5 text-sm text-[var(--foreground)] active:opacity-90"
             >
               Sign out
             </button>
           </div>
         </header>
 
-        <div className="rounded-2xl border border-blue-500/25 bg-slate-900/80 p-6 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-8">
-          <h2 className="text-center text-base font-medium text-slate-100 sm:text-lg">
-            Session Completed for{" "}
-            <span className="font-semibold text-blue-300">{saveProject.name}</span>
+        <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-6 shadow-xl shadow-black/15 backdrop-blur-sm sm:p-8">
+          <h2 className="text-center text-base font-medium text-[var(--foreground)] sm:text-lg">
+            Session for{" "}
+            <span className="font-semibold text-[var(--app-accent)]">
+              {saveProject.name}
+            </span>
           </h2>
           {sessionSaveHint ? (
-            <p className="mt-2 text-center text-sm text-slate-400">
+            <p className="mt-2 text-center text-sm text-[var(--app-muted)]">
               {sessionSaveHint.early
                 ? `Logging ~${sessionSaveHint.minutes} min (rounded to the nearest minute).`
                 : `Full session: ${sessionSaveHint.minutes} min.`}
             </p>
           ) : null}
 
-          <label className="mt-6 block text-sm font-semibold text-slate-200 sm:mt-8">
+          <label className="mt-6 block text-sm font-semibold text-[var(--foreground)] sm:mt-8">
             What did you accomplish?
           </label>
           <textarea
-            className="mt-2 min-h-[140px] w-full rounded-xl border border-blue-500/25 bg-slate-950/80 px-3 py-3 text-base text-slate-100 outline-none ring-blue-400/30 placeholder:text-slate-500 focus:ring-2"
-            placeholder="Describe your progress..."
+            className="mt-2 min-h-[140px] w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-3 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 placeholder:text-[var(--app-muted)] focus:ring-2"
+            placeholder="Quick note to future you…"
             value={summary}
             onChange={(e) => setSummary(e.target.value)}
           />
@@ -584,9 +654,9 @@ export function ActivityApp({
             type="button"
             disabled={saving || summary.trim().length < 1}
             onClick={() => void saveSession()}
-            className="mt-6 min-h-11 w-full rounded-xl bg-blue-400 py-3 text-sm font-medium text-slate-950 shadow-lg shadow-blue-500/20 transition hover:bg-blue-300 disabled:cursor-not-allowed disabled:opacity-50"
+            className="mt-6 min-h-11 w-full rounded-xl bg-[var(--app-accent)] py-3 text-sm font-medium text-white shadow-lg shadow-[var(--app-accent)]/25 transition hover:bg-[var(--app-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
           >
-            {saving ? "Saving…" : "Save Session"}
+            {saving ? "Saving…" : "Save session"}
           </button>
         </div>
       </div>
@@ -594,52 +664,166 @@ export function ActivityApp({
   }
 
   return (
-    <div className="mx-auto box-border min-h-dvh w-full min-w-0 max-w-6xl px-3 py-6 sm:px-4 sm:py-8 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <header className="mb-6 flex flex-col gap-4 sm:mb-8 sm:flex-row sm:flex-wrap sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-slate-100 sm:text-3xl">
-            My Activity
-          </h1>
-          <p className="mt-1 text-sm text-slate-400 sm:text-base">
-            Track progress and see your activity
+    <div className="mx-auto box-border min-h-dvh w-full min-w-0 max-w-[1400px] px-3 py-5 sm:px-5 sm:py-7 pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--app-border)] pb-4">
+        <div className="min-w-0">
+          <p className="font-display truncate text-xl tracking-tight text-[var(--foreground)] sm:text-2xl">
+            {appName}
+          </p>
+          <p className="text-xs text-[var(--app-muted)]">
+            Log a sesh · see your journey
           </p>
         </div>
-
-        <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-          <div className="flex items-center gap-3 rounded-full border border-blue-500/25 bg-slate-900/70 px-4 py-2 text-sm text-slate-200 backdrop-blur-sm">
-            <span className="flex items-center gap-1.5">
-              <Flame className="h-4 w-4 shrink-0 text-orange-400" />
+        <div className="flex flex-shrink-0 items-center gap-2">
+          <div className="hidden items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-1.5 text-xs text-[var(--foreground)] sm:flex sm:text-sm">
+            <span className="flex items-center gap-1">
+              <Flame className="h-3.5 w-3.5 text-[var(--app-accent)]" />
               {stats?.streak ?? 0}
             </span>
-            <span className="h-4 w-px bg-blue-500/30" />
-            <span className="flex items-center gap-1.5">
-              <Trophy className="h-4 w-4 shrink-0 text-amber-400" />
+            <span className="h-3 w-px bg-[var(--app-border)]" />
+            <span className="flex items-center gap-1">
+              <Trophy className="h-3.5 w-3.5 text-amber-400" />
               {stats?.sessionCount ?? 0}
             </span>
           </div>
           <button
             type="button"
             onClick={() => void logout()}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-blue-500/25 bg-slate-900/50 px-3 py-2.5 text-sm text-slate-300 active:bg-slate-800"
+            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2 text-xs font-medium text-[var(--foreground)] sm:text-sm"
           >
-            <LogOut className="h-4 w-4 shrink-0" />
-            Sign out
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">Sign out</span>
           </button>
         </div>
       </header>
 
-      <div className="grid min-w-0 gap-5 lg:grid-cols-12 lg:gap-6">
-        <section className="min-w-0 lg:col-span-4">
-          <div className="min-w-0 rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
-            <div className="flex flex-col items-center">
-              <div className="relative h-36 w-36 max-w-[min(100%,9rem)] shrink-0">
+      <div className="mt-6 flex flex-col gap-8 xl:grid xl:grid-cols-[260px_minmax(0,1fr)_minmax(0,300px)] xl:items-start xl:gap-8">
+        <aside className="order-2 min-w-0 xl:sticky xl:top-4 xl:order-1 xl:self-start">
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
+            <h2 className="font-display text-lg text-[var(--foreground)]">
+              Projects
+            </h2>
+            <p className="mt-0.5 text-xs text-[var(--app-muted)]">
+              Tap one to focus the timer
+            </p>
+            <ul className="mt-4 space-y-2">
+              {projects.map((p) => {
+                const label = p.isMisc ? "Misc. tasks" : p.name;
+                const active = p.id === selectedId;
+                return (
+                  <li key={p.id}>
+                    <button
+                      type="button"
+                      disabled={running || arming}
+                      onClick={() => setSelectedId(p.id)}
+                      className={`flex w-full min-h-[4.25rem] items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
+                        active
+                          ? "border-[var(--app-accent)] bg-[var(--app-accent)]/10"
+                          : "border-[var(--app-border)] bg-[var(--background)]/40 hover:border-[var(--app-accent-muted)]"
+                      } disabled:opacity-50`}
+                    >
+                      <span
+                        className="mt-1.5 h-2.5 w-2.5 shrink-0 rounded-full"
+                        style={{
+                          backgroundColor: `hsl(${projectHue(label)} 50% 52%)`,
+                        }}
+                        aria-hidden
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                          {label}
+                        </p>
+                        <p className="text-xs text-[var(--app-muted)]">
+                          {formatProjectTotal(p.totalSec ?? 0)}
+                          <span className="opacity-50"> · </span>
+                          {formatRelativeShort(p.lastSessionAt)}
+                        </p>
+                      </div>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+
+            <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+              {!addingProject ? (
+                <button
+                  type="button"
+                  disabled={running || arming}
+                  onClick={() => setAddingProject(true)}
+                  className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[var(--app-border)] text-sm font-medium text-[var(--app-accent)] hover:bg-[var(--app-accent)]/5 disabled:opacity-50"
+                >
+                  <Plus className="h-4 w-4" />
+                  New project
+                </button>
+              ) : (
+                <div className="flex flex-col gap-2 sm:flex-row">
+                  <input
+                    className="min-h-11 flex-1 rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                    placeholder="Project name"
+                    value={newProjectName}
+                    onChange={(e) => setNewProjectName(e.target.value)}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void addProject()}
+                    className="min-h-11 shrink-0 rounded-xl bg-[var(--app-accent)] px-4 py-2.5 text-sm font-medium text-white"
+                  >
+                    Add
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <ul className="mt-3 space-y-1 border-t border-[var(--app-border)] pt-3">
+              {projects
+                .filter((p) => !p.isMisc)
+                .map((p) => (
+                  <li
+                    key={`del-${p.id}`}
+                    className="flex items-center justify-between gap-2 rounded-lg px-1 py-0.5 text-xs text-[var(--app-muted)]"
+                  >
+                    <span className="truncate">{p.name}</span>
+                    <button
+                      type="button"
+                      disabled={running || arming}
+                      title="Delete project"
+                      onClick={() => void deleteProject(p.id)}
+                      className="shrink-0 rounded p-1.5 text-[var(--app-muted)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </button>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        </aside>
+
+        <main className="order-1 flex min-w-0 flex-col gap-6 xl:order-2">
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-5 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-7">
+            <p className="font-display text-lg text-[var(--foreground)] sm:text-xl">
+              What are you building tonight?
+            </p>
+            {selectedProject ? (
+              <p className="mt-1 text-xs text-[var(--app-muted)]">
+                On{" "}
+                <span className="font-medium text-[var(--foreground)]/80">
+                  {selectedProject.isMisc
+                    ? "Misc. tasks"
+                    : selectedProject.name}
+                </span>
+              </p>
+            ) : null}
+
+            <div className="mt-5 flex justify-center">
+              <div className="relative h-40 w-40 max-w-[min(100%,10rem)] shrink-0">
                 <svg className="-rotate-90" viewBox="0 0 100 100">
                   <circle
                     cx="50"
                     cy="50"
                     r="44"
                     fill="none"
-                    className="stroke-slate-800"
+                    className="stroke-[var(--background)]"
                     strokeWidth="10"
                   />
                   <circle
@@ -647,7 +831,7 @@ export function ActivityApp({
                     cy="50"
                     r="44"
                     fill="none"
-                    className="stroke-blue-500 transition-[stroke-dashoffset] duration-500"
+                    className="stroke-[var(--app-accent)] transition-[stroke-dashoffset] duration-500"
                     strokeWidth="10"
                     strokeLinecap="round"
                     strokeDasharray={`${circ} ${circ}`}
@@ -655,25 +839,25 @@ export function ActivityApp({
                   />
                 </svg>
                 <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-                  <div className="text-2xl font-semibold tabular-nums text-slate-100 sm:text-3xl">
+                  <div className="text-3xl font-semibold tabular-nums text-[var(--foreground)]">
                     {arming ? "…" : formatClock(remaining)}
                   </div>
                   {running ? (
-                    <span className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-blue-400/90 sm:text-xs">
+                    <span className="mt-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--app-accent)] sm:text-xs">
                       In progress
                     </span>
                   ) : null}
-                  <Clock className="mt-1 h-4 w-4 text-slate-500" />
+                  <Clock className="mt-1 h-4 w-4 text-[var(--app-muted)]" />
                 </div>
               </div>
             </div>
 
             <div className="mt-6">
-              <label className="text-xs font-medium uppercase tracking-wide text-slate-400">
+              <label className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">
                 Project
               </label>
               <select
-                className="mt-1 min-h-11 w-full appearance-none rounded-xl border border-blue-500/25 bg-slate-950/80 px-3 py-2.5 text-base text-slate-100 outline-none ring-blue-400/30 focus:ring-2 disabled:opacity-60"
+                className="mt-1 min-h-11 w-full appearance-none rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2 disabled:opacity-60"
                 value={selectedId}
                 disabled={running || arming}
                 onChange={(e) => setSelectedId(e.target.value)}
@@ -695,8 +879,8 @@ export function ActivityApp({
                   onClick={() => applyPreset(i)}
                   className={`min-h-11 flex-1 rounded-xl border px-2 py-2.5 text-sm font-medium transition active:scale-[0.98] ${
                     presetIdx === i
-                      ? "border-blue-400 bg-blue-500 text-white shadow-md shadow-blue-500/25"
-                      : "border-blue-500/20 bg-slate-950/50 text-slate-200 active:bg-slate-800"
+                      ? "border-[var(--app-accent)] bg-[var(--app-accent)] text-white shadow-md shadow-[var(--app-accent)]/30"
+                      : "border-[var(--app-border)] bg-[var(--background)]/50 text-[var(--foreground)] active:opacity-90"
                   } disabled:opacity-50`}
                 >
                   {p.label}
@@ -709,17 +893,17 @@ export function ActivityApp({
                 type="button"
                 disabled={!selectedId || arming}
                 onClick={() => void startTimer()}
-                className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-blue-500 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/30 transition hover:bg-blue-400 active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
+                className="mt-5 flex min-h-12 w-full items-center justify-center gap-2 rounded-xl bg-[var(--app-accent)] py-3.5 text-sm font-medium text-white shadow-lg shadow-[var(--app-accent)]/30 transition hover:bg-[var(--app-accent-hover)] active:scale-[0.99] disabled:cursor-not-allowed disabled:opacity-50"
               >
                 <Play className="h-4 w-4 shrink-0 fill-current" />
-                {arming ? "Get ready…" : "Start Timer"}
+                {arming ? "Get ready…" : "Start session"}
               </button>
             ) : (
               <div className="mt-5 flex flex-col gap-2 sm:flex-row">
                 <button
                   type="button"
                   onClick={() => stopAndLogSession()}
-                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-blue-500 py-3.5 text-sm font-medium text-white shadow-lg shadow-blue-500/30 active:scale-[0.99]"
+                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl bg-[var(--app-accent)] py-3.5 text-sm font-medium text-white shadow-lg shadow-[var(--app-accent)]/25 active:scale-[0.99]"
                 >
                   Stop &amp; log
                 </button>
@@ -734,75 +918,51 @@ export function ActivityApp({
                       discardSession();
                     }
                   }}
-                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-slate-600 bg-slate-950/50 py-3.5 text-sm font-medium text-slate-300 active:bg-slate-800"
+                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 py-3.5 text-sm font-medium text-[var(--foreground)] active:opacity-90"
                 >
                   <RotateCcw className="h-4 w-4 shrink-0" />
                   Discard
                 </button>
               </div>
             )}
+          </div>
 
-            <div className="mt-6 border-t border-blue-500/15 pt-4">
-              {!addingProject ? (
-                <button
-                  type="button"
-                  disabled={running || arming}
-                  onClick={() => setAddingProject(true)}
-                  className="inline-flex min-h-11 items-center gap-2 text-sm font-medium text-blue-400 disabled:opacity-50"
-                >
-                  <Plus className="h-4 w-4" />
-                  New project
-                </button>
-              ) : (
-                <div className="flex flex-col gap-2 sm:flex-row">
-                  <input
-                    className="min-h-11 flex-1 rounded-xl border border-blue-500/25 bg-slate-950/80 px-3 py-2.5 text-base text-slate-100 outline-none ring-blue-400/30 focus:ring-2"
-                    placeholder="Project name"
-                    value={newProjectName}
-                    onChange={(e) => setNewProjectName(e.target.value)}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void addProject()}
-                    className="min-h-11 shrink-0 rounded-xl bg-blue-500 px-4 py-2.5 text-sm font-medium text-white"
-                  >
-                    Add
-                  </button>
-                </div>
-              )}
-
-              <ul className="mt-3 space-y-2">
-                {projects
-                  .filter((p) => !p.isMisc)
-                  .map((p) => (
-                    <li
-                      key={p.id}
-                      className="flex min-h-11 items-center justify-between gap-2 rounded-lg border border-blue-500/15 bg-slate-950/40 px-3 py-2 text-sm"
-                    >
-                      <span className="truncate text-slate-200">{p.name}</span>
-                      <button
-                        type="button"
-                        disabled={running || arming}
-                        title="Delete project"
-                        onClick={() => void deleteProject(p.id)}
-                        className="flex shrink-0 touch-manipulation p-2 text-slate-500 hover:text-red-400 disabled:opacity-40"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </li>
-                  ))}
-              </ul>
+          <div className="grid grid-cols-3 gap-2 sm:gap-3">
+            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2 py-3 text-center sm:px-3">
+              <Clock className="mx-auto h-4 w-4 text-[var(--app-accent)]" />
+              <p className="mt-2 text-sm font-semibold tabular-nums text-[var(--foreground)] sm:text-base">
+                {formatWeeklyHoursLine(stats?.weeklyLoggedMinutes ?? 0)}
+              </p>
+              <p className="mt-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--app-muted)] sm:text-[10px]">
+                This week
+              </p>
+            </div>
+            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2 py-3 text-center sm:px-3">
+              <Flame className="mx-auto h-4 w-4 text-[var(--app-accent)]" />
+              <p className="mt-2 text-sm font-semibold tabular-nums text-[var(--foreground)] sm:text-base">
+                {stats?.streak ?? 0}
+              </p>
+              <p className="mt-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--app-muted)] sm:text-[10px]">
+                Day streak
+              </p>
+            </div>
+            <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2 py-3 text-center sm:px-3">
+              <Folder className="mx-auto h-4 w-4 text-[var(--app-accent)]" />
+              <p className="mt-2 text-sm font-semibold tabular-nums text-[var(--foreground)] sm:text-base">
+                {stats?.activeProjectsCount ?? 1}
+              </p>
+              <p className="mt-0.5 text-[9px] font-medium uppercase tracking-wide text-[var(--app-muted)] sm:text-[10px]">
+                Active
+              </p>
             </div>
           </div>
-        </section>
 
-        <section className="min-w-0 space-y-5 lg:col-span-8 lg:space-y-6">
-          <div className="min-w-0 overflow-hidden rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
-            <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
-              <h2 className="text-lg font-semibold text-slate-100">
-                Activity Overview
+          <div className="min-w-0 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
+            <div className="mb-3 flex flex-col gap-1 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+              <h2 className="font-display text-lg text-[var(--foreground)]">
+                Your journey
               </h2>
-              <span className="text-sm text-slate-400">{totalLabel}</span>
+              <span className="text-xs text-[var(--app-muted)]">{totalLabel}</span>
             </div>
             <ContributionHeatmap
               heatmap={stats.heatmap}
@@ -810,14 +970,14 @@ export function ActivityApp({
             />
           </div>
 
-          <div className="rounded-2xl border border-blue-500/25 bg-slate-900/70 p-5 shadow-lg shadow-blue-500/5 backdrop-blur-sm sm:p-6">
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
             <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-lg font-semibold text-slate-100">
-                  Weekly Goal Progress
+                <h2 className="font-display text-lg text-[var(--foreground)]">
+                  Weekly goal
                 </h2>
-                <p className="mt-1 text-sm text-slate-400">
-                  {weeklyPct}% Complete
+                <p className="mt-1 text-sm text-[var(--app-muted)]">
+                  {weeklyPct}% of {stats?.weeklyGoalHours ?? 7}h target
                 </p>
               </div>
               {!goalEdit ? (
@@ -829,9 +989,9 @@ export function ActivityApp({
                     );
                     setGoalEdit(true);
                   }}
-                  className="min-h-11 shrink-0 rounded-lg border border-blue-500/25 bg-slate-950/50 px-3 py-2.5 text-sm text-slate-200 active:bg-slate-800"
+                  className="min-h-10 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-3 py-2 text-sm text-[var(--foreground)] active:opacity-90"
                 >
-                  Update Goal
+                  Edit goal
                 </button>
               ) : (
                 <div className="flex flex-wrap items-center gap-2">
@@ -839,13 +999,13 @@ export function ActivityApp({
                     type="number"
                     min={0.5}
                     step={0.5}
-                    className="min-h-11 w-24 rounded-lg border border-blue-500/25 bg-slate-950/80 px-2 py-2 text-base text-slate-100"
+                    className="min-h-10 w-24 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-2 py-2 text-base text-[var(--foreground)]"
                     value={goalDraft}
                     onChange={(e) => setGoalDraft(e.target.value)}
                   />
                   <button
                     type="button"
-                    className="min-h-11 rounded-lg bg-blue-500 px-4 py-2 text-sm font-medium text-white"
+                    className="min-h-10 rounded-lg bg-[var(--app-accent)] px-4 py-2 text-sm font-medium text-white"
                     onClick={async () => {
                       const v = Number(goalDraft);
                       await fetch("/api/settings", {
@@ -863,21 +1023,37 @@ export function ActivityApp({
               )}
             </div>
 
-            <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-blue-950/80">
+            <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-[var(--background)]">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-blue-600 to-sky-400 transition-[width] duration-500"
+                className="h-full rounded-full bg-gradient-to-r from-[var(--app-accent)] to-amber-400 transition-[width] duration-500"
                 style={{ width: `${weeklyPct}%` }}
               />
             </div>
-            <p className="mt-3 text-right text-xs text-slate-500">
-              Goal: {stats?.weeklyGoalHours ?? 7}h
-            </p>
           </div>
-        </section>
+        </main>
 
-        <section className="min-w-0 lg:col-span-12">
-          <WorkEntriesFeed entries={workEntries} displayName={DISPLAY_NAME} />
-        </section>
+        <aside className="order-3 min-w-0 xl:sticky xl:top-4 xl:self-start">
+          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm">
+            <h3 className="font-display text-lg text-[var(--foreground)]">
+              Build together
+            </h3>
+            <p className="mt-1 text-sm text-[var(--app-muted)]">
+              Shared team feeds are next — for now, invite people to the same
+              app and compare notes IRL.
+            </p>
+            <button
+              type="button"
+              onClick={() => copyAppLink()}
+              className="mt-4 min-h-10 w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 px-3 py-2.5 text-sm font-medium text-[var(--foreground)] hover:border-[var(--app-accent-muted)]"
+            >
+              Copy app link
+            </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
+            <WorkEntriesFeed entries={workEntries} displayName={displayName} />
+          </div>
+        </aside>
       </div>
     </div>
   );

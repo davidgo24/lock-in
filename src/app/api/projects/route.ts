@@ -1,16 +1,58 @@
 import { NextResponse } from "next/server";
 import { ensureDefaultData } from "@/lib/bootstrap";
+import { getSessionUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  await ensureDefaultData();
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  await ensureDefaultData(userId);
+
   const projects = await prisma.project.findMany({
+    where: { userId },
     orderBy: [{ isMisc: "desc" }, { name: "asc" }],
   });
-  return NextResponse.json({ projects });
+
+  const [totals, lastSessions] = await Promise.all([
+    prisma.activitySession.groupBy({
+      by: ["projectId"],
+      where: { project: { userId } },
+      _sum: { durationSec: true },
+    }),
+    prisma.activitySession.groupBy({
+      by: ["projectId"],
+      where: { project: { userId } },
+      _max: { createdAt: true },
+    }),
+  ]);
+
+  const totalMap = Object.fromEntries(
+    totals.map((t) => [t.projectId, t._sum.durationSec ?? 0]),
+  );
+  const lastMap = Object.fromEntries(
+    lastSessions.map((t) => [t.projectId, t._max.createdAt]),
+  );
+
+  return NextResponse.json({
+    projects: projects.map((p) => ({
+      id: p.id,
+      name: p.name,
+      isMisc: p.isMisc,
+      totalSec: totalMap[p.id] ?? 0,
+      lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
+    })),
+  });
 }
 
 export async function POST(req: Request) {
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let body: { name?: string };
   try {
     body = await req.json();
@@ -24,8 +66,16 @@ export async function POST(req: Request) {
   }
 
   const project = await prisma.project.create({
-    data: { name, isMisc: false },
+    data: { userId, name, isMisc: false },
   });
 
-  return NextResponse.json({ project });
+  return NextResponse.json({
+    project: {
+      id: project.id,
+      name: project.name,
+      isMisc: project.isMisc,
+      totalSec: 0,
+      lastSessionAt: null,
+    },
+  });
 }

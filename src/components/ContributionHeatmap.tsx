@@ -8,13 +8,13 @@ type Props = {
   rangeStartKey: string;
 };
 
-/** Dark-theme friendly: low activity must stay visible (not blue-950 on slate). */
+/** Dark theme + terracotta heatmap (readable on near-black UI). */
 const levels = [
-  "bg-slate-700",
-  "bg-blue-600/85",
-  "bg-blue-500",
-  "bg-sky-400",
-  "bg-cyan-300",
+  "bg-stone-600",
+  "bg-orange-950/90",
+  "bg-orange-800/95",
+  "bg-orange-600",
+  "bg-amber-400",
 ];
 
 function minuteLevel(minutes: number): number {

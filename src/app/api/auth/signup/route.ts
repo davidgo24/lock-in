@@ -1,0 +1,65 @@
+import { NextResponse } from "next/server";
+import { hash } from "bcryptjs";
+import { prisma } from "@/lib/prisma";
+import { ensureDefaultData } from "@/lib/bootstrap";
+import { COOKIE, createSessionToken } from "@/lib/auth";
+
+function normalizeEmail(s: string): string {
+  return s.trim().toLowerCase();
+}
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export async function POST(req: Request) {
+  let body: { email?: string; password?: string; displayName?: string };
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+
+  const email = normalizeEmail(String(body.email ?? ""));
+  const password = String(body.password ?? "");
+  const displayName =
+    typeof body.displayName === "string" ? body.displayName.trim() : "";
+
+  if (!EMAIL_RE.test(email)) {
+    return NextResponse.json({ error: "Valid email required" }, { status: 400 });
+  }
+  if (password.length < 8) {
+    return NextResponse.json(
+      { error: "Password must be at least 8 characters" },
+      { status: 400 },
+    );
+  }
+
+  const taken = await prisma.user.findUnique({ where: { email } });
+  if (taken) {
+    return NextResponse.json({ error: "An account with this email already exists" }, {
+      status: 409,
+    });
+  }
+
+  const passwordHash = await hash(password, 10);
+
+  const user = await prisma.user.create({
+    data: {
+      email,
+      passwordHash,
+      displayName: displayName.length > 0 ? displayName.slice(0, 80) : null,
+    },
+  });
+
+  await ensureDefaultData(user.id);
+
+  const token = await createSessionToken(user.id);
+  const res = NextResponse.json({ ok: true });
+  res.cookies.set(COOKIE, token, {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+  });
+  return res;
+}

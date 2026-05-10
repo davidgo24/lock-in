@@ -1,17 +1,19 @@
 import { prisma } from "@/lib/prisma";
 
-/** Ensures singleton settings and the Misc project exist (safe to call often). */
-export async function ensureDefaultData() {
+/** Ensures settings and the Misc project exist for this user (safe to call often). */
+export async function ensureDefaultData(userId: string) {
   await prisma.appSettings.upsert({
-    where: { id: "default" },
-    create: { id: "default", weeklyGoalHours: 7 },
+    where: { userId },
+    create: { userId, weeklyGoalHours: 7 },
     update: {},
   });
 
-  const misc = await prisma.project.findFirst({ where: { isMisc: true } });
+  const misc = await prisma.project.findFirst({
+    where: { userId, isMisc: true },
+  });
   if (!misc) {
     await prisma.project.create({
-      data: { name: "Misc. tasks", isMisc: true },
+      data: { userId, name: "Misc. tasks", isMisc: true },
     });
   }
 }

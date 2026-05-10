@@ -1,29 +1,38 @@
 import { NextResponse } from "next/server";
-import { timingSafeEqual } from "crypto";
+import { compare } from "bcryptjs";
+import { prisma } from "@/lib/prisma";
 import { COOKIE, createSessionToken } from "@/lib/auth";
 
+function normalizeEmail(s: string): string {
+  return s.trim().toLowerCase();
+}
+
 export async function POST(req: Request) {
-  let body: { password?: string };
+  let body: { email?: string; password?: string };
   try {
     body = await req.json();
   } catch {
     return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
   }
 
-  const expected = process.env.APP_PASSWORD ?? "";
-  const given = String(body.password ?? "");
-  const a = Buffer.from(given, "utf8");
-  const b = Buffer.from(expected, "utf8");
-  const ok =
-    a.length === b.length &&
-    a.length > 0 &&
-    timingSafeEqual(a, b);
+  const email = normalizeEmail(String(body.email ?? ""));
+  const password = String(body.password ?? "");
 
-  if (!ok) {
-    return NextResponse.json({ error: "Invalid password" }, { status: 401 });
+  if (!email || !password) {
+    return NextResponse.json({ error: "Email and password required" }, { status: 400 });
   }
 
-  const token = await createSessionToken();
+  const user = await prisma.user.findUnique({ where: { email } });
+  if (!user) {
+    return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+  }
+
+  const ok = await compare(password, user.passwordHash);
+  if (!ok) {
+    return NextResponse.json({ error: "Invalid email or password" }, { status: 401 });
+  }
+
+  const token = await createSessionToken(user.id);
   const res = NextResponse.json({ ok: true });
   res.cookies.set(COOKIE, token, {
     httpOnly: true,

@@ -8,14 +8,16 @@ export function localYmd(d: Date): string {
   return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
 }
 
-/** Calendar day the user “joined”: first activity day, else first project created (local calendar). */
-export async function getHeatmapRangeStartKey(): Promise<string> {
+/** Calendar day the user "joined": first activity day, else first project created (local calendar). */
+export async function getHeatmapRangeStartKey(userId: string): Promise<string> {
   const [earliestSession, earliestProject] = await Promise.all([
     prisma.activitySession.findFirst({
+      where: { project: { userId } },
       orderBy: { workDate: "asc" },
       select: { workDate: true },
     }),
     prisma.project.findFirst({
+      where: { userId },
       orderBy: { createdAt: "asc" },
       select: { createdAt: true },
     }),
@@ -31,11 +33,11 @@ export async function getHeatmapRangeStartKey(): Promise<string> {
   return localYmd(new Date());
 }
 
-export async function getStatsBundle() {
+export async function getStatsBundle(userId: string) {
   const endD = new Date();
   const endKey = localYmd(endD);
 
-  let startKey = await getHeatmapRangeStartKey();
+  let startKey = await getHeatmapRangeStartKey(userId);
   if (startKey > endKey) {
     startKey = endKey;
   }
@@ -46,6 +48,7 @@ export async function getStatsBundle() {
   const rows = await prisma.activitySession.groupBy({
     by: ["workDate"],
     where: {
+      project: { userId },
       workDate: { gte, lte },
     },
     _sum: { durationSec: true },
@@ -82,16 +85,23 @@ export async function getStatsBundle() {
 
   const weekSessions = await prisma.activitySession.findMany({
     where: {
+      project: { userId },
       workDate: { gte: weekStart, lte: lte },
     },
     select: { durationSec: true },
   });
   const weeklySec = weekSessions.reduce((a, x) => a + x.durationSec, 0);
 
-  const sessionCount = await prisma.activitySession.count();
+  const sessionCount = await prisma.activitySession.count({
+    where: { project: { userId } },
+  });
+
+  const activeProjectsCount = await prisma.project.count({
+    where: { userId },
+  });
 
   const settings = await prisma.appSettings.findUnique({
-    where: { id: "default" },
+    where: { userId },
   });
   const weeklyGoalHours = settings?.weeklyGoalHours ?? 7;
 
@@ -103,6 +113,7 @@ export async function getStatsBundle() {
     sessionCount,
     weeklyLoggedMinutes: Math.round(weeklySec / 60),
     weeklyGoalHours,
+    activeProjectsCount,
   };
 }
 

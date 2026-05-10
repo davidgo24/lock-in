@@ -1,16 +1,22 @@
 @import "tailwindcss";
 
 :root {
-  --background: #0a0f1a;
-  --foreground: #e8eef8;
-  --app-surface: #121a2b;
-  --app-border: rgba(59, 130, 246, 0.22);
+  --background: #090b10;
+  --foreground: #e8e4df;
+  --app-surface: #121520;
+  --app-surface-card: rgba(18, 21, 32, 0.78);
+  --app-accent: #c7614a;
+  --app-accent-hover: #d4785c;
+  --app-accent-muted: rgba(199, 97, 74, 0.22);
+  --app-border: rgba(199, 97, 74, 0.25);
+  --app-muted: #8a8580;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+  --font-display: var(--font-dm-serif), ui-serif, Georgia, serif;
 }
 
 html {
@@ -29,4 +35,8 @@ body {
   padding-top: env(safe-area-inset-top);
   padding-bottom: env(safe-area-inset-bottom);
   -webkit-tap-highlight-color: transparent;
+}
+
+.font-display {
+  font-family: var(--font-dm-serif), ui-serif, Georgia, serif;
 }

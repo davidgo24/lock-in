@@ -12,7 +12,10 @@ export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
   if (pathname.startsWith("/login")) return NextResponse.next();
-  if (pathname === "/api/auth/login") return NextResponse.next();
+  if (pathname.startsWith("/signup")) return NextResponse.next();
+  if (pathname === "/api/auth/login" || pathname === "/api/auth/signup") {
+    return NextResponse.next();
+  }
 
   const token = req.cookies.get(COOKIE)?.value;
 
@@ -27,7 +30,12 @@ export async function middleware(req: NextRequest) {
   }
 
   try {
-    await jwtVerify(token, getKey(), { algorithms: ["HS256"] });
+    const { payload } = await jwtVerify(token, getKey(), {
+      algorithms: ["HS256"],
+    });
+    if (typeof payload.sub !== "string" || !payload.sub) {
+      throw new Error("Invalid subject");
+    }
     return NextResponse.next();
   } catch {
     if (pathname.startsWith("/api/")) {
@@ -35,6 +43,7 @@ export async function middleware(req: NextRequest) {
     }
     const url = req.nextUrl.clone();
     url.pathname = "/login";
+    url.searchParams.set("next", pathname);
     return NextResponse.redirect(url);
   }
 }

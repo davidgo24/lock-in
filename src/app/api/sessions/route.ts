@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { getSessionUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 function parseWorkDate(s: string): Date | null {
@@ -8,6 +9,11 @@ function parseWorkDate(s: string): Date | null {
 }
 
 export async function POST(req: Request) {
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let body: {
     projectId?: string;
     summary?: string;
@@ -32,10 +38,15 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Invalid duration" }, { status: 400 });
   }
   if (summary.length < 1 || summary.length > 4000) {
-    return NextResponse.json({ error: "Please describe what you accomplished" }, { status: 400 });
+    return NextResponse.json(
+      { error: "Please describe what you accomplished" },
+      { status: 400 },
+    );
   }
 
-  const project = await prisma.project.findUnique({ where: { id: projectId } });
+  const project = await prisma.project.findFirst({
+    where: { id: projectId, userId },
+  });
   if (!project) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }

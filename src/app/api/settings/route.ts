@@ -1,14 +1,25 @@
 import { NextResponse } from "next/server";
+import { getSessionUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 
 export async function GET() {
-  const row = await prisma.appSettings.findUnique({ where: { id: "default" } });
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const row = await prisma.appSettings.findUnique({ where: { userId } });
   return NextResponse.json({
     weeklyGoalHours: row?.weeklyGoalHours ?? 7,
   });
 }
 
 export async function PATCH(req: Request) {
+  const userId = await getSessionUserId();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   let body: { weeklyGoalHours?: number };
   try {
     body = await req.json();
@@ -21,8 +32,8 @@ export async function PATCH(req: Request) {
   }
 
   const row = await prisma.appSettings.upsert({
-    where: { id: "default" },
-    create: { id: "default", weeklyGoalHours: h },
+    where: { userId },
+    create: { userId, weeklyGoalHours: h },
     update: { weeklyGoalHours: h },
   });
 

@@ -11,24 +11,29 @@ function getKey() {
   return new TextEncoder().encode(s);
 }
 
-export async function createSessionToken(): Promise<string> {
-  return new SignJWT({ sub: "me" })
+export async function createSessionToken(userId: string): Promise<string> {
+  return new SignJWT({ sub: userId })
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("30d")
     .sign(getKey());
 }
 
-export async function verifyToken(token: string | undefined): Promise<boolean> {
-  if (!token) return false;
+/** Verify JWT and return user id from `sub`, or null. */
+export async function getUserIdFromTokenString(
+  token: string | undefined,
+): Promise<string | null> {
+  if (!token) return null;
   try {
-    await jwtVerify(token, getKey(), { algorithms: ["HS256"] });
-    return true;
+    const { payload } = await jwtVerify(token, getKey(), {
+      algorithms: ["HS256"],
+    });
+    return typeof payload.sub === "string" ? payload.sub : null;
   } catch {
-    return false;
+    return null;
   }
 }
 
-export async function isAuthenticated(): Promise<boolean> {
+export async function getSessionUserId(): Promise<string | null> {
   const jar = await cookies();
-  return verifyToken(jar.get(COOKIE)?.value);
+  return getUserIdFromTokenString(jar.get(COOKIE)?.value);
 }

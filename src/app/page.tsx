@@ -1,32 +1,68 @@
+import { redirect } from "next/navigation";
 import { ActivityApp } from "@/components/ActivityApp";
 import { ensureDefaultData } from "@/lib/bootstrap";
+import { getSessionUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getStatsBundle } from "@/lib/stats";
 import { getRecentWorkEntries } from "@/lib/work-entries";
 
-/** Matches fields selected by prisma.project.findMany() for this page. */
-type ProjectListRow = {
-  id: string;
-  name: string;
-  isMisc: boolean;
-};
+const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "5to9 Club";
 
 export const dynamic = "force-dynamic";
 
 export default async function Home() {
-  await ensureDefaultData();
+  const userId = await getSessionUserId();
+  if (!userId) {
+    redirect("/login");
+  }
+
+  await ensureDefaultData(userId);
+
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { displayName: true, email: true },
+  });
+
+  const displayName =
+    user?.displayName?.trim() ||
+    user?.email?.split("@")[0] ||
+    "You";
+
   const [projectRows, initialStats, entryRows] = await Promise.all([
     prisma.project.findMany({
+      where: { userId },
       orderBy: [{ isMisc: "desc" }, { name: "asc" }],
-    }) as Promise<ProjectListRow[]>,
-    getStatsBundle(),
-    getRecentWorkEntries(),
+    }),
+    getStatsBundle(userId),
+    getRecentWorkEntries(userId),
   ]);
+
+  const [totals, lastSessions] = await Promise.all([
+    prisma.activitySession.groupBy({
+      by: ["projectId"],
+      where: { project: { userId } },
+      _sum: { durationSec: true },
+    }),
+    prisma.activitySession.groupBy({
+      by: ["projectId"],
+      where: { project: { userId } },
+      _max: { createdAt: true },
+    }),
+  ]);
+
+  const totalMap = Object.fromEntries(
+    totals.map((t) => [t.projectId, t._sum.durationSec ?? 0]),
+  );
+  const lastMap = Object.fromEntries(
+    lastSessions.map((t) => [t.projectId, t._max.createdAt]),
+  );
 
   const initialProjects = projectRows.map((p) => ({
     id: p.id,
     name: p.name,
     isMisc: p.isMisc,
+    totalSec: totalMap[p.id] ?? 0,
+    lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
   }));
 
   const initialWorkEntries = entryRows.map((e) => ({
@@ -39,11 +75,13 @@ export default async function Home() {
   }));
 
   return (
-    <div className="min-h-dvh w-full max-w-[100vw] overflow-x-clip bg-gradient-to-b from-slate-950 via-[#0a0f1a] to-slate-950">
+    <div className="min-h-dvh w-full max-w-[100vw] overflow-x-clip bg-[var(--background)]">
       <ActivityApp
         initialProjects={initialProjects}
         initialStats={initialStats}
         initialWorkEntries={initialWorkEntries}
+        displayName={displayName}
+        appName={appName}
       />
     </div>
   );

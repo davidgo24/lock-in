@@ -7,14 +7,34 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+model User {
+  id           String    @id @default(cuid())
+  email        String    @unique
+  passwordHash String
+  displayName  String?
+  createdAt    DateTime  @default(now())
+  projects     Project[]
+  settings     AppSettings?
+}
+
+model AppSettings {
+  userId          String @id
+  user            User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  weeklyGoalHours Float  @default(7)
+}
+
 model Project {
   id        String            @id @default(cuid())
+  userId    String
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   isMisc    Boolean           @default(false)
   createdAt DateTime          @default(now())
   sessions  ActivitySession[]
 
+  @@index([userId])
   @@index([isMisc])
+  @@index([userId, isMisc])
 }
 
 model ActivitySession {
@@ -30,9 +50,4 @@ model ActivitySession {
 
   @@index([workDate])
   @@index([projectId])
-}
-
-model AppSettings {
-  id              String @id
-  weeklyGoalHours Float  @default(7)
 }
