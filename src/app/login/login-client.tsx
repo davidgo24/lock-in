@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function LoginClient() {
   const sp = useSearchParams();
@@ -35,7 +36,10 @@ export function LoginClient() {
   }
 
   return (
-    <div className="flex min-h-dvh w-full max-w-[100vw] flex-col items-center justify-center overflow-x-clip bg-[var(--background)] px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+    <div className="relative flex min-h-dvh w-full max-w-[100vw] flex-col items-center justify-center overflow-x-clip bg-[var(--background)] px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 sm:right-4 sm:top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-8 shadow-xl shadow-black/20 backdrop-blur-sm">
         <h1 className="font-display text-2xl tracking-tight text-[var(--foreground)]">
           Sign in

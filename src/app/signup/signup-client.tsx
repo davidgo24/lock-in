@@ -2,11 +2,13 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import { ThemeToggle } from "@/components/ThemeToggle";
 
 export function SignupClient() {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
+  const [handleDraft, setHandleDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -22,6 +24,7 @@ export function SignupClient() {
           email,
           password,
           displayName: displayName.trim() || undefined,
+          handle: handleDraft.trim() || undefined,
         }),
       });
       if (!res.ok) {
@@ -36,7 +39,10 @@ export function SignupClient() {
   }
 
   return (
-    <div className="flex min-h-dvh w-full max-w-[100vw] flex-col items-center justify-center overflow-x-clip bg-[var(--background)] px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+    <div className="relative flex min-h-dvh w-full max-w-[100vw] flex-col items-center justify-center overflow-x-clip bg-[var(--background)] px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
+      <div className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 sm:right-4 sm:top-4">
+        <ThemeToggle />
+      </div>
       <div className="w-full max-w-sm rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-8 shadow-xl shadow-black/20 backdrop-blur-sm">
         <h1 className="font-display text-2xl tracking-tight text-[var(--foreground)]">
           Sign up
@@ -59,6 +65,28 @@ export function SignupClient() {
               maxLength={80}
               autoComplete="nickname"
             />
+          </div>
+          <div>
+            <label className="text-xs font-medium text-[var(--app-muted)]">
+              Handle{" "}
+              <span className="font-normal opacity-70">(optional)</span>
+            </label>
+            <input
+              type="text"
+              className="mt-1 min-h-11 w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/40 placeholder:text-[var(--app-muted)] focus:ring-2"
+              value={handleDraft}
+              onChange={(e) => setHandleDraft(e.target.value)}
+              placeholder="your_handle (friends find you)"
+              maxLength={30}
+              autoCapitalize="none"
+              autoCorrect="off"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            <p className="mt-1 text-xs text-[var(--app-muted)]">
+              Lowercase letters, numbers, underscores — 3–30 chars. You can set
+              this later in the app too.
+            </p>
           </div>
           <div>
             <label className="text-xs font-medium text-[var(--app-muted)]">

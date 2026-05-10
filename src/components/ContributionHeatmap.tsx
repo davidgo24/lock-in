@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { Fragment, useMemo } from "react";
 
 type Props = {
   heatmap: Record<string, number>;
@@ -8,14 +8,18 @@ type Props = {
   rangeStartKey: string;
 };
 
-/** Dark theme + terracotta heatmap (readable on near-black UI). */
+/** Heat levels — CSS vars switch with `data-theme` (dark terracotta / light rose–wine). */
 const levels = [
-  "bg-stone-600",
-  "bg-orange-950/90",
-  "bg-orange-800/95",
-  "bg-orange-600",
-  "bg-amber-400",
+  "bg-[var(--heat-0)]",
+  "bg-[var(--heat-1)]",
+  "bg-[var(--heat-2)]",
+  "bg-[var(--heat-3)]",
+  "bg-[var(--heat-4)]",
 ];
+
+const CELL_PX = 11;
+const GAP_PX = 3;
+const LABEL_COL_PX = 28;
 
 function minuteLevel(minutes: number): number {
   if (minutes <= 0) return 0;
@@ -47,6 +51,14 @@ function parseLocalYmd(key: string): Date {
   const [y, m, d] = key.split("-").map(Number);
   if (!y || !m || !d) return new Date();
   return new Date(y, m - 1, d);
+}
+
+/** Left labels like GitHub: Mon / Wed / Fri only. */
+function dayRowLabel(rowIdx: number): string {
+  if (rowIdx === 1) return "Mon";
+  if (rowIdx === 3) return "Wed";
+  if (rowIdx === 5) return "Fri";
+  return "";
 }
 
 export function ContributionHeatmap({ heatmap, rangeStartKey }: Props) {
@@ -110,69 +122,93 @@ export function ContributionHeatmap({ heatmap, rangeStartKey }: Props) {
     return { weeks, monthLabels };
   }, [heatmap, rangeStartKey]);
 
+  if (weeks.length === 0) {
+    return (
+      <p className="text-sm text-[var(--app-muted)]">No days to show yet — log a session.</p>
+    );
+  }
+
+  const colTemplate = `${LABEL_COL_PX}px repeat(${weeks.length}, ${CELL_PX}px)`;
+
   return (
-    <div className="w-full max-w-full min-w-0 overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch]">
-      <div className="relative w-full min-w-0 max-w-full">
+    <div className="w-full min-w-0 overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch]">
+      <div
+        className="grid w-max max-w-none"
+        style={{
+          gridTemplateColumns: colTemplate,
+          gap: `${GAP_PX}px`,
+        }}
+      >
+        {/* Month header row */}
         <div
-          className="mb-1 grid text-[10px] text-slate-500 sm:text-[11px]"
-          style={{
-            gridTemplateColumns: `1.25rem repeat(${weeks.length}, minmax(0, 1fr))`,
-          }}
-        >
-          <div />
-          {weeks.map((_, i) => {
-            const label = monthLabels.find((m) => m.col === i)?.label ?? "";
-            return (
-              <div key={i} className="min-w-0 truncate px-px text-left sm:px-0.5">
-                {label}
-              </div>
-            );
-          })}
-        </div>
-
-        <div
-          className="grid items-start gap-x-[2px] sm:gap-x-[3px]"
-          style={{
-            gridTemplateColumns: `1.25rem repeat(${weeks.length}, minmax(0, 1fr))`,
-          }}
-        >
-          {["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].map(
-            (day, rowIdx) => (
-              <div key={day} className="contents">
-                <div className="flex h-2.5 items-center pr-0.5 text-[9px] leading-none text-slate-500 sm:h-3 sm:text-[11px]">
-                  {rowIdx % 2 === 1 ? "" : day.slice(0, 1)}
-                </div>
-                {weeks.map((week, colIdx) => {
-                  const cell = week[rowIdx];
-                  return (
-                    <div
-                      key={`${colIdx}-${rowIdx}`}
-                      title={
-                        cell ? formatCellTitle(cell.key, cell.sec) : "No activity"
-                      }
-                      className={`h-2.5 w-full min-w-0 rounded-[1px] sm:h-3 sm:rounded-[2px] ${
-                        cell ? levels[cell.level] : "bg-slate-900/80"
-                      }`}
-                    />
-                  );
-                })}
-              </div>
-            ),
-          )}
-        </div>
-
-        <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[10px] text-slate-500 sm:text-[11px]">
-          <span>Less</span>
-          <div className="flex gap-0.5 sm:gap-1">
-            {levels.map((c) => (
-              <div
-                key={c}
-                className={`h-2 w-2 rounded-[1px] sm:h-3 sm:w-3 sm:rounded-[2px] ${c}`}
-              />
-            ))}
+          aria-hidden
+          className="min-h-[15px]"
+          style={{ width: LABEL_COL_PX }}
+        />
+        {weeks.map((_, i) => (
+          <div
+            key={`m-${i}`}
+            className="flex items-end pb-px text-[10px] leading-none tracking-tight text-[var(--app-muted)] sm:text-[11px]"
+            style={{ width: CELL_PX }}
+          >
+            {monthLabels.find((m) => m.col === i)?.label ?? ""}
           </div>
-          <span>More</span>
+        ))}
+
+        {/* Sun..Sat rows (row 0 = Sunday, GitHub-style) */}
+        {[0, 1, 2, 3, 4, 5, 6].map((rowIdx) => (
+          <Fragment key={`row-${rowIdx}`}>
+            <div
+              className="flex items-center justify-end text-[9px] leading-none text-[var(--app-muted)] sm:text-[10px]"
+              style={{
+                width: LABEL_COL_PX,
+                height: CELL_PX,
+              }}
+            >
+              {dayRowLabel(rowIdx)}
+            </div>
+            {weeks.map((week, colIdx) => {
+              const cell = week[rowIdx];
+              const isInactive = cell === null;
+              return (
+                <div
+                  key={`${colIdx}-${rowIdx}`}
+                  title={
+                    cell
+                      ? formatCellTitle(cell.key, cell.sec)
+                      : isInactive
+                        ? "Outside range"
+                        : "No activity"
+                  }
+                  className={`shrink-0 rounded-[2px] border border-[var(--heatmap-cell-border)] ${
+                    cell
+                      ? levels[cell.level]
+                      : "bg-[var(--heat-inactive)]"
+                  }`}
+                  style={{
+                    width: CELL_PX,
+                    height: CELL_PX,
+                    boxSizing: "border-box",
+                  }}
+                />
+              );
+            })}
+          </Fragment>
+        ))}
+      </div>
+
+      <div className="mt-3 flex flex-wrap items-center justify-end gap-2 text-[10px] text-[var(--app-muted)] sm:text-[11px]">
+        <span>Less</span>
+        <div className="flex gap-0.5 sm:gap-1">
+          {levels.map((c) => (
+            <div
+              key={c}
+              className={`rounded-[2px] border border-[var(--heatmap-cell-border)] ${c}`}
+              style={{ width: CELL_PX, height: CELL_PX }}
+            />
+          ))}
         </div>
+        <span>More</span>
       </div>
     </div>
   );

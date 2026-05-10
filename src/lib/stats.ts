@@ -12,7 +12,7 @@ export function localYmd(d: Date): string {
 export async function getHeatmapRangeStartKey(userId: string): Promise<string> {
   const [earliestSession, earliestProject] = await Promise.all([
     prisma.activitySession.findFirst({
-      where: { project: { userId } },
+      where: { project: { is: { userId } } },
       orderBy: { workDate: "asc" },
       select: { workDate: true },
     }),
@@ -48,7 +48,7 @@ export async function getStatsBundle(userId: string) {
   const rows = await prisma.activitySession.groupBy({
     by: ["workDate"],
     where: {
-      project: { userId },
+      project: { is: { userId } },
       workDate: { gte, lte },
     },
     _sum: { durationSec: true },
@@ -85,7 +85,7 @@ export async function getStatsBundle(userId: string) {
 
   const weekSessions = await prisma.activitySession.findMany({
     where: {
-      project: { userId },
+      project: { is: { userId } },
       workDate: { gte: weekStart, lte: lte },
     },
     select: { durationSec: true },
@@ -93,7 +93,7 @@ export async function getStatsBundle(userId: string) {
   const weeklySec = weekSessions.reduce((a, x) => a + x.durationSec, 0);
 
   const sessionCount = await prisma.activitySession.count({
-    where: { project: { userId } },
+    where: { project: { is: { userId } } },
   });
 
   const activeProjectsCount = await prisma.project.count({

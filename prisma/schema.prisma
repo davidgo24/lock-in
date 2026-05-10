@@ -12,9 +12,42 @@ model User {
   email        String    @unique
   passwordHash String
   displayName  String?
+  /// Lowercase unique @handle without the @ (3–30 chars [a-z0-9_], set via API).
+  handle       String?   @unique
   createdAt    DateTime  @default(now())
   projects     Project[]
   settings     AppSettings?
+
+  sentFriendRequests     FriendRequest[] @relation("FriendRequestFrom")
+  receivedFriendRequests FriendRequest[] @relation("FriendRequestTo")
+  friendshipsAsA         Friendship[]    @relation("FriendshipUserA")
+  friendshipsAsB         Friendship[]    @relation("FriendshipUserB")
+}
+
+/// Pending invite — mutual friendship created only after `toUser` accepts.
+model FriendRequest {
+  id         String   @id @default(cuid())
+  fromUserId String
+  toUserId   String
+  fromUser   User     @relation("FriendRequestFrom", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUser     User     @relation("FriendRequestTo", fields: [toUserId], references: [id], onDelete: Cascade)
+  createdAt  DateTime @default(now())
+
+  @@unique([fromUserId, toUserId])
+  @@index([toUserId])
+  @@index([fromUserId])
+}
+
+/// Accepted mutual friends only; `userAId` is lexicographically < `userBId`.
+model Friendship {
+  userAId   String
+  userBId   String
+  userA     User     @relation("FriendshipUserA", fields: [userAId], references: [id], onDelete: Cascade)
+  userB     User     @relation("FriendshipUserB", fields: [userBId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@id([userAId, userBId])
+  @@index([userBId])
 }
 
 model AppSettings {

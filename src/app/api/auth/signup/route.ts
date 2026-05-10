@@ -4,6 +4,8 @@ import { prisma } from "@/lib/prisma";
 import { ensureDefaultData } from "@/lib/bootstrap";
 import { COOKIE, createSessionToken } from "@/lib/auth";
 
+import { normalizeHandleInput, validateHandle } from "@/lib/handle";
+
 function normalizeEmail(s: string): string {
   return s.trim().toLowerCase();
 }
@@ -11,7 +13,12 @@ function normalizeEmail(s: string): string {
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(req: Request) {
-  let body: { email?: string; password?: string; displayName?: string };
+  let body: {
+    email?: string;
+    password?: string;
+    displayName?: string;
+    handle?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -40,6 +47,25 @@ export async function POST(req: Request) {
     });
   }
 
+  let handle: string | null = null;
+  if (typeof body.handle === "string" && body.handle.trim().length > 0) {
+    const h = normalizeHandleInput(body.handle);
+    const herr = validateHandle(h);
+    if (herr) {
+      return NextResponse.json({ error: herr }, { status: 400 });
+    }
+    const ht = await prisma.user.findUnique({
+      where: { handle: h },
+      select: { id: true },
+    });
+    if (ht) {
+      return NextResponse.json({ error: "That handle is already taken." }, {
+        status: 409,
+      });
+    }
+    handle = h;
+  }
+
   const passwordHash = await hash(password, 10);
 
   const user = await prisma.user.create({
@@ -47,6 +73,7 @@ export async function POST(req: Request) {
       email,
       passwordHash,
       displayName: displayName.length > 0 ? displayName.slice(0, 80) : null,
+      handle,
     },
   });
 

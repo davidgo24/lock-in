@@ -3,8 +3,13 @@ import { ActivityApp } from "@/components/ActivityApp";
 import { ensureDefaultData } from "@/lib/bootstrap";
 import { getSessionUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { getFriendsState } from "@/lib/friends";
 import { getStatsBundle } from "@/lib/stats";
-import { getRecentWorkEntries } from "@/lib/work-entries";
+import {
+  getFriendsWorkEntries,
+  getRecentWorkEntries,
+  mapFriendFeedEntryToClient,
+} from "@/lib/work-entries";
 
 const appName = process.env.NEXT_PUBLIC_APP_NAME ?? "5to9 Club";
 
@@ -31,33 +36,36 @@ export default async function Home() {
   const displayName =
     user.displayName?.trim() || user.email.split("@")[0] || "You";
 
-  const [projectRows, initialStats, entryRows] = await Promise.all([
-    prisma.project.findMany({
-      where: { userId },
-      orderBy: [{ isMisc: "desc" }, { name: "asc" }],
-    }),
-    getStatsBundle(userId),
-    getRecentWorkEntries(userId),
-  ]);
+  const [projectRows, initialStats, entryRows, friendsState, friendRows] =
+    await Promise.all([
+      prisma.project.findMany({
+        where: { userId },
+        orderBy: [{ isMisc: "desc" }, { name: "asc" }],
+      }),
+      getStatsBundle(userId),
+      getRecentWorkEntries(userId),
+      getFriendsState(userId),
+      getFriendsWorkEntries(userId),
+    ]);
 
   const [totals, lastSessions] = await Promise.all([
     prisma.activitySession.groupBy({
       by: ["projectId"],
-      where: { project: { userId } },
+      where: { project: { is: { userId } } },
       _sum: { durationSec: true },
     }),
     prisma.activitySession.groupBy({
       by: ["projectId"],
-      where: { project: { userId } },
+      where: { project: { is: { userId } } },
       _max: { createdAt: true },
     }),
   ]);
 
   const totalMap = Object.fromEntries(
-    totals.map((t) => [t.projectId, t._sum.durationSec ?? 0]),
+    totals.map((t) => [t.projectId, t._sum?.durationSec ?? 0]),
   );
   const lastMap = Object.fromEntries(
-    lastSessions.map((t) => [t.projectId, t._max.createdAt]),
+    lastSessions.map((t) => [t.projectId, t._max?.createdAt]),
   );
 
   const initialProjects = projectRows.map((p) => ({
@@ -77,12 +85,16 @@ export default async function Home() {
     project: e.project,
   }));
 
+  const initialFriendFeed = friendRows.map(mapFriendFeedEntryToClient);
+
   return (
     <div className="min-h-dvh w-full max-w-[100vw] overflow-x-clip bg-[var(--background)]">
       <ActivityApp
         initialProjects={initialProjects}
         initialStats={initialStats}
         initialWorkEntries={initialWorkEntries}
+        initialFriendFeed={initialFriendFeed}
+        initialFriendsState={friendsState}
         displayName={displayName}
         appName={appName}
       />

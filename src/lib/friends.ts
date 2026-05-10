@@ -1,0 +1,113 @@
+import type { Prisma } from "@prisma/client";
+import { prisma } from "@/lib/prisma";
+
+const userPublicSelect = {
+  id: true,
+  displayName: true,
+  handle: true,
+} as const satisfies Prisma.UserSelect;
+
+export type PublicUserMini = Prisma.UserGetPayload<{ select: typeof userPublicSelect }>;
+
+export function publicLabel(u: PublicUserMini): string {
+  const d = u.displayName?.trim();
+  if (d) return d;
+  if (u.handle) return `@${u.handle}`;
+  return "Member";
+}
+
+/** Lexicographic order so `userAId` < `userBId` in `Friendship`. */
+export function friendshipKeyPair(a: string, b: string): [string, string] {
+  return a < b ? [a, b] : [b, a];
+}
+
+export async function getFriendUserIds(userId: string): Promise<string[]> {
+  const asA = await prisma.friendship.findMany({
+    where: { userAId: userId },
+    select: { userBId: true },
+  });
+  const asB = await prisma.friendship.findMany({
+    where: { userBId: userId },
+    select: { userAId: true },
+  });
+  return [...asA.map((r) => r.userBId), ...asB.map((r) => r.userAId)];
+}
+
+export type FriendsStatePayload = {
+  myHandle: string | null;
+  friends: {
+    userId: string;
+    handle: string | null;
+    label: string;
+  }[];
+  incoming: {
+    id: string;
+    from: { userId: string; handle: string | null; label: string };
+  }[];
+  outgoing: {
+    id: string;
+    to: { userId: string; handle: string | null; label: string };
+  }[];
+};
+
+export async function getFriendsState(userId: string): Promise<FriendsStatePayload> {
+  const me = await prisma.user.findUnique({
+    where: { id: userId },
+    select: { handle: true },
+  });
+
+  const friendIds = await getFriendUserIds(userId);
+  const friends =
+    friendIds.length === 0
+      ? []
+      : await prisma.user.findMany({
+          where: { id: { in: friendIds } },
+          select: userPublicSelect,
+        });
+
+  const incomingRows = await prisma.friendRequest.findMany({
+    where: { toUserId: userId },
+    include: { fromUser: { select: userPublicSelect } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  const outgoingRows = await prisma.friendRequest.findMany({
+    where: { fromUserId: userId },
+    include: { toUser: { select: userPublicSelect } },
+    orderBy: { createdAt: "desc" },
+  });
+
+  return {
+    myHandle: me?.handle ?? null,
+    friends: friends.map((u) => ({
+      userId: u.id,
+      handle: u.handle,
+      label: publicLabel(u),
+    })),
+    incoming: incomingRows.map((r) => ({
+      id: r.id,
+      from: {
+        userId: r.fromUser.id,
+        handle: r.fromUser.handle,
+        label: publicLabel(r.fromUser),
+      },
+    })),
+    outgoing: outgoingRows.map((r) => ({
+      id: r.id,
+      to: {
+        userId: r.toUser.id,
+        handle: r.toUser.handle,
+        label: publicLabel(r.toUser),
+      },
+    })),
+  };
+}
+
+export async function areFriends(a: string, b: string): Promise<boolean> {
+  const [x, y] = friendshipKeyPair(a, b);
+  const row = await prisma.friendship.findUnique({
+    where: { userAId_userBId: { userAId: x, userBId: y } },
+    select: { userAId: true },
+  });
+  return row != null;
+}

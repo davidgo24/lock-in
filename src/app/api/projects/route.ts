@@ -19,12 +19,12 @@ export async function GET() {
   const [totals, lastSessions] = await Promise.all([
     prisma.activitySession.groupBy({
       by: ["projectId"],
-      where: { project: { userId } },
+      where: { project: { is: { userId } } },
       _sum: { durationSec: true },
     }),
     prisma.activitySession.groupBy({
       by: ["projectId"],
-      where: { project: { userId } },
+      where: { project: { is: { userId } } },
       _max: { createdAt: true },
     }),
   ]);

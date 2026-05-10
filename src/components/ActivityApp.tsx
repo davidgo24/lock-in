@@ -19,6 +19,7 @@ import {
   Trophy,
 } from "lucide-react";
 import { ContributionHeatmap } from "@/components/ContributionHeatmap";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import {
   WorkEntriesFeed,
   type WorkEntryRow,
@@ -27,6 +28,7 @@ import {
   playStartCountdown,
   playTimerCompleteRing,
 } from "@/lib/sounds";
+import type { FriendsStatePayload } from "@/lib/friends";
 import type { StatsBundle } from "@/lib/stats";
 
 type Project = {
@@ -153,6 +155,8 @@ type ActivityAppProps = {
   initialProjects: Project[];
   initialStats: StatsBundle;
   initialWorkEntries: WorkEntryRow[];
+  initialFriendFeed: WorkEntryRow[];
+  initialFriendsState: FriendsStatePayload;
   displayName: string;
   appName: string;
 };
@@ -161,6 +165,8 @@ export function ActivityApp({
   initialProjects,
   initialStats,
   initialWorkEntries,
+  initialFriendFeed,
+  initialFriendsState,
   displayName,
   appName,
 }: ActivityAppProps) {
@@ -198,16 +204,30 @@ export function ActivityApp({
   const timerEndsAtRef = useRef<number | null>(null);
   const [workEntries, setWorkEntries] =
     useState<WorkEntryRow[]>(initialWorkEntries);
+  const [friendFeed, setFriendFeed] =
+    useState<WorkEntryRow[]>(initialFriendFeed);
+  const [friendsState, setFriendsState] =
+    useState<FriendsStatePayload>(initialFriendsState);
+  const [handleDraft, setHandleDraft] = useState(
+    initialFriendsState.myHandle ?? "",
+  );
+  const [requestHandleDraft, setRequestHandleDraft] = useState("");
+  const [friendMsg, setFriendMsg] = useState<string | null>(null);
+  const [handleSaving, setHandleSaving] = useState(false);
 
   const loadAll = useCallback(async () => {
-    const [pRes, sRes, eRes] = await Promise.all([
+    const [pRes, sRes, eRes, fRes, ffRes] = await Promise.all([
       fetch("/api/projects"),
       fetch("/api/stats"),
       fetch("/api/entries"),
+      fetch("/api/friends"),
+      fetch("/api/entries/friends"),
     ]);
     const pJson = await pRes.json();
     const sJson = await sRes.json();
     const eJson = await eRes.json();
+    const fJson = (await fRes.json()) as FriendsStatePayload;
+    const ffJson = await ffRes.json();
     const rawEntries = (eJson.entries ?? []) as Array<{
       id: string;
       summary: string;
@@ -232,6 +252,40 @@ export function ActivityApp({
         project: e.project,
       })),
     );
+
+    if (fRes.ok) {
+      setFriendsState(fJson);
+      setHandleDraft(fJson.myHandle ?? "");
+    }
+
+    if (ffRes.ok) {
+      const rawFriend = (ffJson.entries ?? []) as Array<{
+        id: string;
+        summary: string;
+        durationSec: number;
+        createdAt: string;
+        workDate: string;
+        project: { name: string; isMisc: boolean };
+        authorLabel?: string;
+      }>;
+      setFriendFeed(
+        rawFriend.map((e) => ({
+          id: e.id,
+          summary: e.summary,
+          durationSec: e.durationSec,
+          createdAt:
+            typeof e.createdAt === "string"
+              ? e.createdAt
+              : new Date(e.createdAt).toISOString(),
+          workDate:
+            typeof e.workDate === "string"
+              ? e.workDate.slice(0, 10)
+              : new Date(e.workDate).toISOString().slice(0, 10),
+          project: e.project,
+          authorLabel: e.authorLabel,
+        })),
+      );
+    }
 
     setProjects(
       (pJson.projects ?? []).map(
@@ -570,12 +624,101 @@ export function ActivityApp({
     const url = typeof window !== "undefined" ? window.location.origin : "";
     void navigator.clipboard.writeText(url).then(
       () => {
-        alert("App link copied — share it with your crew.");
+        alert("App link copied.");
       },
       () => {
         alert(url);
       },
     );
+  }
+
+  async function saveMyHandle() {
+    setFriendMsg(null);
+    setHandleSaving(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: handleDraft }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFriendMsg((j as { error?: string }).error ?? "Could not save handle");
+        return;
+      }
+      await loadAll();
+      setFriendMsg("Handle saved — friends can find you.");
+    } finally {
+      setHandleSaving(false);
+    }
+  }
+
+  async function sendFriendRequest() {
+    setFriendMsg(null);
+    const res = await fetch("/api/friends/request", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ handle: requestHandleDraft }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setFriendMsg((j as { error?: string }).error ?? "Request failed");
+      return;
+    }
+    setFriendsState(j as FriendsStatePayload);
+    setRequestHandleDraft("");
+    setFriendMsg("Request sent.");
+    void loadAll();
+  }
+
+  async function acceptRequest(requestId: string) {
+    setFriendMsg(null);
+    const res = await fetch("/api/friends/accept", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setFriendMsg((j as { error?: string }).error ?? "Could not accept");
+      return;
+    }
+    setFriendsState(j as FriendsStatePayload);
+    setFriendMsg("You're connected — their sessions show below.");
+    void loadAll();
+  }
+
+  async function rejectRequest(requestId: string) {
+    setFriendMsg(null);
+    const res = await fetch("/api/friends/reject", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setFriendMsg((j as { error?: string }).error ?? "Could not decline");
+      return;
+    }
+    setFriendsState(j as FriendsStatePayload);
+    void loadAll();
+  }
+
+  async function removeFriend(otherUserId: string) {
+    if (!confirm("Remove this friend? They won't see your sessions and you won't see theirs.")) {
+      return;
+    }
+    setFriendMsg(null);
+    const res = await fetch(`/api/friends/${otherUserId}`, {
+      method: "DELETE",
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setFriendMsg((j as { error?: string }).error ?? "Could not remove");
+      return;
+    }
+    setFriendsState(j as FriendsStatePayload);
+    void loadAll();
   }
 
   if (showSave && !saveProject) {
@@ -615,13 +758,16 @@ export function ActivityApp({
                 Note what you shipped — that&apos;s your proof.
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => void logout()}
-              className="min-h-11 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2.5 text-sm text-[var(--foreground)] active:opacity-90"
-            >
-              Sign out
-            </button>
+            <div className="flex shrink-0 gap-2">
+              <ThemeToggle />
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="min-h-11 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2.5 text-sm text-[var(--foreground)] active:opacity-90"
+              >
+                Sign out
+              </button>
+            </div>
           </div>
         </header>
 
@@ -682,10 +828,11 @@ export function ActivityApp({
             </span>
             <span className="h-3 w-px bg-[var(--app-border)]" />
             <span className="flex items-center gap-1">
-              <Trophy className="h-3.5 w-3.5 text-amber-400" />
+              <Trophy className="h-3.5 w-3.5 text-[var(--app-highlight)]" />
               {stats?.sessionCount ?? 0}
             </span>
           </div>
+          <ThemeToggle />
           <button
             type="button"
             onClick={() => void logout()}
@@ -1025,7 +1172,7 @@ export function ActivityApp({
 
             <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-[var(--background)]">
               <div
-                className="h-full rounded-full bg-gradient-to-r from-[var(--app-accent)] to-amber-400 transition-[width] duration-500"
+                className="h-full rounded-full bg-gradient-to-r from-[var(--app-accent)] to-[var(--app-highlight)] transition-[width] duration-500"
                 style={{ width: `${weeklyPct}%` }}
               />
             </div>
@@ -1035,19 +1182,191 @@ export function ActivityApp({
         <aside className="order-3 min-w-0 xl:sticky xl:top-4 xl:self-start">
           <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm">
             <h3 className="font-display text-lg text-[var(--foreground)]">
-              Build together
+              Friends
             </h3>
             <p className="mt-1 text-sm text-[var(--app-muted)]">
-              Shared team feeds are next — for now, invite people to the same
-              app and compare notes IRL.
+              Pick a unique handle, then send a request. They accept — you
+              both see each other&apos;s session logs (not one-way follows).
             </p>
+
+            {friendMsg ? (
+              <p className="mt-3 text-sm text-[var(--foreground)]/90">
+                {friendMsg}
+              </p>
+            ) : null}
+
+            <div className="mt-4 space-y-2">
+              <label className="text-xs font-medium text-[var(--app-muted)]">
+                Your handle
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                  placeholder="e.g. alex_codes"
+                  value={handleDraft}
+                  onChange={(e) => setHandleDraft(e.target.value)}
+                  maxLength={30}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  disabled={handleSaving}
+                  className="min-h-10 shrink-0 rounded-lg bg-[var(--app-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                  onClick={() => void saveMyHandle()}
+                >
+                  {handleSaving ? "Saving…" : "Save"}
+                </button>
+              </div>
+              <p className="text-xs text-[var(--app-muted)]">
+                3–30 characters: lowercase letters, numbers, underscores. Used
+                so friends can find you — not your password.
+              </p>
+            </div>
+
+            <div className="mt-5 space-y-2 border-t border-[var(--app-border)] pt-4">
+              <label className="text-xs font-medium text-[var(--app-muted)]">
+                Add a friend by handle
+              </label>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <input
+                  type="text"
+                  className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                  placeholder="@their_handle"
+                  value={requestHandleDraft}
+                  onChange={(e) => setRequestHandleDraft(e.target.value)}
+                  maxLength={32}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                />
+                <button
+                  type="button"
+                  className="min-h-10 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-4 py-2 text-sm font-medium text-[var(--foreground)]"
+                  onClick={() => void sendFriendRequest()}
+                >
+                  Send request
+                </button>
+              </div>
+            </div>
+
+            {friendsState.incoming.length > 0 ? (
+              <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                  Incoming
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {friendsState.incoming.map((r) => (
+                    <li
+                      key={r.id}
+                      className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+                    >
+                      <span className="text-sm text-[var(--foreground)]">
+                        {r.from.label}
+                        {r.from.handle ? (
+                          <span className="text-[var(--app-muted)]">
+                            {" "}
+                            · @{r.from.handle}
+                          </span>
+                        ) : null}
+                      </span>
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          className="min-h-9 rounded-lg bg-[var(--app-accent)] px-3 py-2 text-xs font-medium text-white"
+                          onClick={() => void acceptRequest(r.id)}
+                        >
+                          Accept
+                        </button>
+                        <button
+                          type="button"
+                          className="min-h-9 rounded-lg border border-[var(--app-border)] px-3 py-2 text-xs text-[var(--foreground)]"
+                          onClick={() => void rejectRequest(r.id)}
+                        >
+                          Decline
+                        </button>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {friendsState.outgoing.length > 0 ? (
+              <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                  Pending
+                </p>
+                <ul className="mt-2 space-y-1">
+                  {friendsState.outgoing.map((r) => (
+                    <li
+                      key={r.id}
+                      className="text-sm text-[var(--app-muted)]"
+                    >
+                      Waiting on {r.to.label}
+                      {r.to.handle ? ` (@${r.to.handle})` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
+            {friendsState.friends.length > 0 ? (
+              <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                  Your friends
+                </p>
+                <ul className="mt-2 space-y-2">
+                  {friendsState.friends.map((f) => (
+                    <li
+                      key={f.userId}
+                      className="flex items-center justify-between gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
+                    >
+                      <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
+                        {f.label}
+                        {f.handle ? (
+                          <span className="text-[var(--app-muted)]">
+                            {" "}
+                            · @{f.handle}
+                          </span>
+                        ) : null}
+                      </span>
+                      <button
+                        type="button"
+                        className="shrink-0 text-xs text-[var(--app-muted)] underline"
+                        onClick={() => void removeFriend(f.userId)}
+                      >
+                        Remove
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : null}
+
             <button
               type="button"
               onClick={() => copyAppLink()}
-              className="mt-4 min-h-10 w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 px-3 py-2.5 text-sm font-medium text-[var(--foreground)] hover:border-[var(--app-accent-muted)]"
+              className="mt-4 w-full text-center text-xs text-[var(--app-muted)] underline"
             >
-              Copy app link
+              Copy app URL (so they can sign up)
             </button>
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
+            <WorkEntriesFeed
+              entries={friendFeed}
+              displayName=""
+              title="Friends&apos; sessions"
+              subtitle="Latest logs from people you&apos;re connected with."
+              emptyMessage={
+                friendsState.friends.length === 0
+                  ? "Add a friend above to see their sessions here."
+                  : "Nothing logged yet — check back after their next sesh."
+              }
+            />
           </div>
 
           <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
