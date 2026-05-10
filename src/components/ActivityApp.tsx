@@ -10,22 +10,17 @@ import {
 import { useSearchParams } from "next/navigation";
 import {
   Archive,
-  Bell,
   Clock,
   Flame,
   Folder,
-  LogOut,
   Pause,
   Play,
   Plus,
   RotateCcw,
-  Trophy,
   X,
 } from "lucide-react";
 import { ContributionHeatmap } from "@/components/ContributionHeatmap";
-import { ThemeToggle } from "@/components/ThemeToggle";
 import {
-  WorkEntriesFeed,
   type WorkEntryRow,
 } from "@/components/WorkEntriesFeed";
 import {
@@ -38,23 +33,29 @@ import {
   requestTimerNotifyPermissionIfNeeded,
 } from "@/lib/timer-notify";
 import { normalizeHandleInput, validateHandle } from "@/lib/handle";
-import {
-  focusMinutesLeftLabel,
-  focusQuipForUser,
-} from "@/lib/focus-quips";
 import type { FriendsStatePayload } from "@/lib/friends";
 import type { StatsBundle } from "@/lib/stats";
-
-type FriendNotice = {
-  text: string;
-  kind: "error" | "success" | "info";
-};
-
-function friendNoticeClass(kind: FriendNotice["kind"]): string {
-  if (kind === "error") return "text-red-500";
-  if (kind === "success") return "text-emerald-600";
-  return "text-[var(--foreground)]/90";
-}
+import {
+  friendNoticeClass,
+  type FriendNotice,
+} from "@/components/activity-app/friend-notice-styles";
+import { SaveSessionScreens } from "@/components/activity-app/SaveSessionScreens";
+import { DashboardHeader } from "@/components/activity-app/DashboardHeader";
+import { CommunitySidebar } from "@/components/activity-app/CommunitySidebar";
+import type { ApiWorkEntry, ActivityNotificationRow } from "@/lib/work-client";
+import { parseWorkEntryFromApi } from "@/lib/work-client";
+import {
+  PRESETS,
+  CUSTOM_PRESET_IDX,
+  TIMER_STORAGE_KEY,
+  clampDurationSec,
+  clearTimerStorage,
+  MAX_TIMER_SEC,
+  MIN_TIMER_SEC,
+  parsePersisted,
+  tryMigrateLegacyV1Key,
+  writeTimerStorage,
+} from "@/lib/activity-timer-local";
 
 type Project = {
   id: string;
@@ -96,24 +97,7 @@ function formatRelativeShort(iso: string | null | undefined): string {
   return "a while ago";
 }
 
-const PRESETS = [
-  { label: "30m", seconds: 30 * 60 },
-  { label: "1h", seconds: 60 * 60 },
-  { label: "2h", seconds: 120 * 60 },
-] as const;
-
-/** Match server cap in `/api/me/focus-status`. */
-const MIN_TIMER_SEC = 60;
-const MAX_TIMER_SEC = 25 * 60 * 60;
 const PAUSE_NUDGE_MS = 5 * 60 * 1000;
-const CUSTOM_PRESET_IDX = PRESETS.length;
-
-function clampDurationSec(sec: number): number {
-  return Math.max(
-    MIN_TIMER_SEC,
-    Math.min(MAX_TIMER_SEC, Math.floor(sec)),
-  );
-}
 
 function presetIdxForDuration(totalSec: number): number {
   const i = PRESETS.findIndex((p) => p.seconds === totalSec);
@@ -157,141 +141,6 @@ function defaultSelectedId(projects: Project[]) {
   return misc?.id ?? projects[0]?.id ?? "";
 }
 
-const TIMER_STORAGE_KEY = "activity-tracker-timer-v2";
-
-type PersistedTimerV2 = {
-  v: 2;
-  selectedId: string;
-  durationSec: number;
-  presetIdx: number;
-  paused: boolean;
-  remaining: number;
-  endsAt: number | null;
-  pausedSince: number | null;
-};
-
-/** @deprecated Old key used v1 shapes; we still read them once for migration. */
-const LEGACY_TIMER_STORAGE_KEY = "activity-tracker-timer-v1";
-
-type PersistedTimerV1 = {
-  v: 1;
-  endsAt: number;
-  durationSec: number;
-  presetIdx: number;
-  selectedId: string;
-};
-
-function parsePersisted(raw: string | null): PersistedTimerV2 | null {
-  if (raw == null || typeof window === "undefined") return null;
-  try {
-    const o = JSON.parse(raw) as Record<string, unknown>;
-    if (o.v === 2) {
-      const p = o as Partial<PersistedTimerV2>;
-      if (typeof p.selectedId !== "string") return null;
-      if (typeof p.durationSec !== "number" || typeof p.remaining !== "number")
-        return null;
-      if (typeof p.presetIdx !== "number") return null;
-      if (typeof p.paused !== "boolean") return null;
-      if (p.endsAt != null && typeof p.endsAt !== "number") return null;
-      if (p.pausedSince != null && typeof p.pausedSince !== "number")
-        return null;
-      if (
-        !Number.isFinite(p.durationSec) ||
-        p.durationSec < MIN_TIMER_SEC ||
-        p.presetIdx < 0 ||
-        p.presetIdx > CUSTOM_PRESET_IDX
-      ) {
-        return null;
-      }
-      return {
-        v: 2,
-        selectedId: p.selectedId,
-        durationSec: p.durationSec,
-        presetIdx: p.presetIdx,
-        paused: p.paused,
-        remaining: Math.max(0, Math.floor(p.remaining)),
-        endsAt: p.endsAt ?? null,
-        pausedSince: p.pausedSince ?? null,
-      };
-    }
-    if (o.v === 1) {
-      const p = o as Partial<PersistedTimerV1>;
-      if (typeof p.endsAt !== "number" || typeof p.durationSec !== "number")
-        return null;
-      if (typeof p.presetIdx !== "number" || typeof p.selectedId !== "string")
-        return null;
-      if (
-        !Number.isFinite(p.endsAt) ||
-        p.durationSec < MIN_TIMER_SEC ||
-        p.presetIdx < 0 ||
-        p.presetIdx >= PRESETS.length
-      ) {
-        return null;
-      }
-      return {
-        v: 2,
-        selectedId: p.selectedId,
-        durationSec: p.durationSec,
-        presetIdx: p.presetIdx,
-        paused: false,
-        remaining: Math.max(0, Math.ceil((p.endsAt - Date.now()) / 1000)),
-        endsAt: p.endsAt,
-        pausedSince: null,
-      };
-    }
-    return null;
-  } catch {
-    return null;
-  }
-}
-
-function tryMigrateLegacyV1Key(): PersistedTimerV2 | null {
-  try {
-    const legacy = localStorage.getItem(LEGACY_TIMER_STORAGE_KEY);
-    if (!legacy) return null;
-    const p = parsePersisted(legacy);
-    if (!p || p.paused || p.endsAt == null) {
-      localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
-      return null;
-    }
-    const left = Math.max(0, Math.ceil((p.endsAt - Date.now()) / 1000));
-    localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
-    if (left <= 0) return null;
-    const record: PersistedTimerV2 = {
-      ...p,
-      remaining: left,
-      paused: false,
-      pausedSince: null,
-    };
-    writeTimerStorage(record);
-    return record;
-  } catch {
-    try {
-      localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
-    return null;
-  }
-}
-
-function writeTimerStorage(p: PersistedTimerV2) {
-  try {
-    localStorage.setItem(TIMER_STORAGE_KEY, JSON.stringify(p));
-  } catch {
-    /* private mode / quota */
-  }
-}
-
-function clearTimerStorage() {
-  try {
-    localStorage.removeItem(TIMER_STORAGE_KEY);
-    localStorage.removeItem(LEGACY_TIMER_STORAGE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
 /** Tell the server when a focus timer is running so friends can see “active” (best-effort). */
 function postFocusStatus(endsAtMs: number | null) {
   const body =
@@ -304,51 +153,6 @@ function postFocusStatus(endsAtMs: number | null) {
     body: JSON.stringify(body),
   }).catch(() => {});
 }
-
-function parseWorkEntryFromApi(e: {
-  id: string;
-  summary: string;
-  durationSec: number;
-  createdAt: string | Date;
-  workDate: string | Date;
-  project: { name: string; isMisc: boolean };
-  authorLabel?: string;
-  social?: {
-    clapCount: number;
-    clappedByMe: boolean;
-    comments: { authorLabel: string; body: string; createdAt: string }[];
-    myComment: string | null;
-  };
-}): WorkEntryRow {
-  return {
-    id: e.id,
-    summary: e.summary,
-    durationSec: e.durationSec,
-    createdAt:
-      typeof e.createdAt === "string"
-        ? e.createdAt
-        : new Date(e.createdAt).toISOString(),
-    workDate:
-      typeof e.workDate === "string"
-        ? e.workDate.slice(0, 10)
-        : new Date(e.workDate).toISOString().slice(0, 10),
-    project: e.project,
-    authorLabel: e.authorLabel,
-    social: e.social,
-  };
-}
-
-type ApiWorkEntry = Parameters<typeof parseWorkEntryFromApi>[0];
-
-type ActivityNotificationRow = {
-  id: string;
-  type: "CLAP" | "COMMENT";
-  readAt: string | null;
-  createdAt: string;
-  actorLabel: string;
-  sessionId: string;
-  sessionSummarySnippet: string;
-};
 
 type ActivityAppProps = {
   initialProjects: Project[];
@@ -428,7 +232,11 @@ export function ActivityApp({
   const [requestHandleDraft, setRequestHandleDraft] = useState("");
   const [friendNotice, setFriendNotice] = useState<FriendNotice | null>(null);
   const [handleSaving, setHandleSaving] = useState(false);
-  const [sidebarTab, setSidebarTab] = useState<"you" | "community">("you");
+  const [sidebarTab, setSidebarTab] = useState<"you" | "community">(() =>
+    initialFriendsState.incoming.length > 0 ? "community" : "you",
+  );
+  /** Community tab: full friends UI is heavy — keep a slim summary until the user expands. */
+  const [friendsPanelExpanded, setFriendsPanelExpanded] = useState(false);
   const [dashNotice, setDashNotice] = useState<FriendNotice | null>(null);
   const [pendingDiscard, setPendingDiscard] = useState(false);
   const pendingDiscardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -577,15 +385,11 @@ export function ActivityApp({
     }
   }
 
-  useLayoutEffect(() => {
-    if (initialFriendsState.incoming.length > 0) {
-      setSidebarTab("community");
-    }
-  }, [initialFriendsState.incoming.length]);
-
+  /* Open Community when `?tab=community` — syncs URL (external) → UI. */
   useLayoutEffect(() => {
     const tab = searchParams.get("tab");
     if (tab === "community") {
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- `tab` query param is external navigation state
       setSidebarTab("community");
     }
     if (typeof window !== "undefined" && tab) {
@@ -821,6 +625,7 @@ export function ActivityApp({
       endsAt: p.endsAt,
       pausedSince: null,
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot hydrate; schedulePauseNudge is intentional
   }, [initialProjects]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -1374,191 +1179,40 @@ export function ActivityApp({
     void loadAll();
   }
 
-  if (showSave && !saveProject) {
+  if (showSave) {
     return (
-      <div className="mx-auto flex min-h-dvh max-w-xl flex-col px-4 py-8 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <p className="text-sm text-[var(--app-muted)]">
-          This focus area is no longer available. Discard and return to the
-          dashboard.
-        </p>
-        <button
-          type="button"
-          className="mt-4 min-h-11 rounded-xl bg-[var(--app-accent)] px-4 py-2.5 text-sm font-medium text-white active:scale-[0.99]"
-          onClick={() => {
-            setShowSave(false);
-            setSaveProjectId(null);
-            completedMeta.current = null;
-            setSessionSaveHint(null);
-            setRemaining(durationSec);
-          }}
-        >
-          Back
-        </button>
-      </div>
-    );
-  }
-
-  if (showSave && saveProject) {
-    return (
-      <div className="mx-auto flex min-h-dvh max-w-xl flex-col px-4 py-6 sm:py-10 pb-[max(1.5rem,env(safe-area-inset-bottom))]">
-        <header className="mb-6 sm:mb-8">
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <h1 className="font-display text-2xl tracking-tight text-[var(--foreground)] sm:text-3xl">
-                Log this session
-              </h1>
-              <p className="mt-1 text-sm text-[var(--app-muted)] sm:text-base">
-                A few words about what you did — that&apos;s your accountability
-                trail.
-              </p>
-            </div>
-            <div className="flex shrink-0 gap-2">
-              <ThemeToggle />
-              <button
-                type="button"
-                onClick={() => void logout()}
-                className="min-h-11 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2.5 text-sm text-[var(--foreground)] active:opacity-90"
-              >
-                Sign out
-              </button>
-            </div>
-          </div>
-        </header>
-
-        <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-6 shadow-xl shadow-black/15 backdrop-blur-sm sm:p-8">
-          <h2 className="text-center text-base font-medium text-[var(--foreground)] sm:text-lg">
-            Session for{" "}
-            <span className="font-semibold text-[var(--app-accent)]">
-              {saveProject.name}
-            </span>
-          </h2>
-          {sessionSaveHint ? (
-            <p className="mt-2 text-center text-sm text-[var(--app-muted)]">
-              {sessionSaveHint.early
-                ? `Saving ${formatDurationLabel(sessionSaveHint.durationSec)} — the time you focused before stopping.`
-                : `Full block: ${formatDurationLabel(sessionSaveHint.durationSec)}.`}
-            </p>
-          ) : null}
-
-          <label className="mt-6 block text-sm font-semibold text-[var(--foreground)] sm:mt-8">
-            What did you work on?
-          </label>
-          <textarea
-            className="mt-2 min-h-[140px] w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-3 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 placeholder:text-[var(--app-muted)] focus:ring-2"
-            placeholder="Reading, coursework, clients, admin — whatever you focused on…"
-            value={summary}
-            onChange={(e) => setSummary(e.target.value)}
-          />
-
-          <button
-            type="button"
-            disabled={saving || summary.trim().length < 1}
-            onClick={() => void saveSession()}
-            className="mt-6 min-h-11 w-full rounded-xl bg-[var(--app-accent)] py-3 text-sm font-medium text-white shadow-lg shadow-[var(--app-accent)]/25 transition hover:bg-[var(--app-accent-hover)] disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            {saving ? "Saving…" : "Save session"}
-          </button>
-        </div>
-      </div>
+      <SaveSessionScreens
+        missingProject={!saveProject}
+        saveProject={saveProject}
+        sessionSaveHint={sessionSaveHint}
+        summary={summary}
+        onSummaryChange={setSummary}
+        saving={saving}
+        onSaveSession={() => void saveSession()}
+        onLogout={() => void logout()}
+        onBackToDashboard={() => {
+          setShowSave(false);
+          setSaveProjectId(null);
+          completedMeta.current = null;
+          setSessionSaveHint(null);
+          setRemaining(durationSec);
+        }}
+        formatDurationLabel={formatDurationLabel}
+      />
     );
   }
 
   return (
     <div className="mx-auto box-border min-h-dvh w-full min-w-0 max-w-[1400px] px-3 py-5 sm:px-5 sm:py-7 pb-[max(1rem,env(safe-area-inset-bottom))]">
-      <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--app-border)] pb-4">
-        <div className="min-w-0">
-          <p className="font-display truncate text-xl tracking-tight text-[var(--foreground)] sm:text-2xl">
-            {appName}
-          </p>
-          <p className="text-xs text-[var(--app-muted)]">
-            Focus sessions · stay accountable
-          </p>
-        </div>
-        <div className="flex flex-shrink-0 items-center gap-2">
-          <div className="hidden items-center gap-2 rounded-full border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-1.5 text-xs text-[var(--foreground)] sm:flex sm:text-sm">
-            <span className="flex items-center gap-1">
-              <Flame className="h-3.5 w-3.5 text-[var(--app-accent)]" />
-              {stats?.streak ?? 0}
-            </span>
-            <span className="h-3 w-px bg-[var(--app-border)]" />
-            <span className="flex items-center gap-1">
-              <Trophy className="h-3.5 w-3.5 text-[var(--app-highlight)]" />
-              {stats?.sessionCount ?? 0}
-            </span>
-          </div>
-          <div className="relative" ref={notifPanelRef}>
-            <button
-              type="button"
-              onClick={() => void toggleNotifPanel()}
-              className={`relative inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border bg-[var(--app-surface-card)] px-2.5 py-2 text-[var(--foreground)] active:opacity-90 ${
-                notif.unreadCount > 0
-                  ? "border-rose-500/70 ring-2 ring-rose-500/35 ring-offset-2 ring-offset-[var(--background)] dark:border-rose-400/60 dark:ring-rose-400/30"
-                  : "border-[var(--app-border)]"
-              }`}
-              aria-expanded={notifOpen}
-              aria-label="Activity notifications"
-            >
-              <Bell
-                className={`h-4 w-4 shrink-0 ${
-                  notif.unreadCount > 0
-                    ? "text-rose-600 dark:text-rose-400"
-                    : ""
-                }`}
-              />
-              {notif.unreadCount > 0 ? (
-                <span className="absolute -right-1.5 -top-1.5 flex min-h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-rose-600 px-1.5 text-[11px] font-extrabold leading-none text-white shadow-md shadow-rose-600/55 ring-2 ring-white tabular-nums dark:bg-rose-500 dark:shadow-rose-500/50 dark:ring-[var(--background)]">
-                  {notif.unreadCount > 9 ? "9+" : notif.unreadCount}
-                </span>
-              ) : null}
-            </button>
-            {notifOpen ? (
-              <div
-                className="absolute right-0 z-50 mt-2 w-[min(calc(100vw-2rem),20rem)] rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-2 shadow-xl shadow-black/20"
-                role="dialog"
-                aria-label="Notifications"
-              >
-                <p className="border-b border-[var(--app-border)] px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                  Reactions on your activity
-                </p>
-                {notif.items.length === 0 ? (
-                  <p className="px-2 py-6 text-center text-sm text-[var(--app-muted)]">
-                    Nothing yet — when friends clap or comment, it shows up
-                    here.
-                  </p>
-                ) : (
-                  <ul className="max-h-80 overflow-y-auto py-1">
-                    {notif.items.map((n) => (
-                      <li
-                        key={n.id}
-                        className="rounded-lg px-2 py-2 text-sm leading-snug text-[var(--foreground)] hover:bg-[var(--background)]/60"
-                      >
-                        <span className="font-medium">{n.actorLabel}</span>{" "}
-                        {n.type === "CLAP"
-                          ? "clapped your activity"
-                          : "commented on your activity"}
-                        {n.sessionSummarySnippet ? (
-                          <span className="mt-0.5 block text-xs text-[var(--app-muted)]">
-                            “{n.sessionSummarySnippet}”
-                          </span>
-                        ) : null}
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </div>
-            ) : null}
-          </div>
-          <ThemeToggle />
-          <button
-            type="button"
-            onClick={() => void logout()}
-            className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2 text-xs font-medium text-[var(--foreground)] sm:text-sm"
-          >
-            <LogOut className="h-3.5 w-3.5 shrink-0" />
-            <span className="hidden sm:inline">Sign out</span>
-          </button>
-        </div>
-      </header>
+      <DashboardHeader
+        appName={appName}
+        stats={stats}
+        notif={notif}
+        notifOpen={notifOpen}
+        notifPanelRef={notifPanelRef}
+        onToggleNotifPanel={toggleNotifPanel}
+        onLogout={logout}
+      />
 
       {dashNotice ? (
         <div
@@ -2037,315 +1691,31 @@ export function ActivityApp({
           </div>
         </main>
 
-        <aside className="order-3 min-w-0 xl:sticky xl:top-4 xl:self-start">
-          <div
-            className="mb-3 flex gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-1 shadow-sm"
-            role="tablist"
-            aria-label="Activity sidebar"
-          >
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidebarTab === "you"}
-              className={`min-h-10 flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                sidebarTab === "you"
-                  ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
-                  : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
-              }`}
-              onClick={() => setSidebarTab("you")}
-            >
-              You
-            </button>
-            <button
-              type="button"
-              role="tab"
-              aria-selected={sidebarTab === "community"}
-              className={`relative min-h-10 flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
-                sidebarTab === "community"
-                  ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
-                  : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
-              }`}
-              onClick={() => setSidebarTab("community")}
-            >
-              Community
-              {friendsState.incoming.length > 0 ? (
-                <span
-                  className="ml-1 inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-[var(--app-accent)] px-1 text-[10px] font-semibold text-white"
-                  aria-label={`${friendsState.incoming.length} pending requests`}
-                >
-                  {friendsState.incoming.length}
-                </span>
-              ) : null}
-            </button>
-          </div>
-
-          {sidebarTab === "you" ? (
-            <div
-              className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5"
-              role="tabpanel"
-            >
-              <WorkEntriesFeed
-                entries={workEntries}
-                displayName={displayName}
-                variant="you"
-                title="Your activity"
-                subtitle="Newest entries — your accountability trail."
-                emptyMessage="Finish a focus block and log it to see entries here."
-              />
-              <p className="mt-4 text-center text-xs text-[var(--app-muted)]">
-                <button
-                  type="button"
-                  className="text-[var(--app-accent)] underline"
-                  onClick={() => setSidebarTab("community")}
-                >
-                  Community
-                </button>{" "}
-                · friend requests and shared activity
-              </p>
-            </div>
-          ) : (
-            <>
-              <div
-                className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm"
-                role="tabpanel"
-              >
-                <h3 className="font-display text-lg text-[var(--foreground)]">
-                  Friends
-                </h3>
-                <p className="mt-1 text-sm text-[var(--app-muted)]">
-                  Pick a unique handle, then send a request. They accept — you
-                  both see each other&apos;s session logs (not one-way follows).
-                  Friends see your note and which focus area you used for each
-                  block.
-                </p>
-
-                {friendNotice ? (
-                  <p
-                    className={`mt-3 text-sm ${friendNoticeClass(friendNotice.kind)}`}
-                    role={friendNotice.kind === "error" ? "alert" : undefined}
-                  >
-                    {friendNotice.text}
-                  </p>
-                ) : null}
-
-                <div className="mt-4 space-y-2">
-                  <label className="text-xs font-medium text-[var(--app-muted)]">
-                    Your handle
-                  </label>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <input
-                      type="text"
-                      className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
-                      placeholder="e.g. alex_codes"
-                      value={handleDraft}
-                      onChange={(e) => setHandleDraft(e.target.value)}
-                      maxLength={30}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      disabled={handleSaving}
-                      className="min-h-10 shrink-0 rounded-lg bg-[var(--app-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                      onClick={() => void saveMyHandle()}
-                    >
-                      {handleSaving ? "Saving…" : "Save"}
-                    </button>
-                  </div>
-                  <p className="text-xs text-[var(--app-muted)]">
-                    3–30 characters: lowercase letters, numbers, underscores.
-                    Used so friends can find you — not your password.
-                  </p>
-                </div>
-
-                <div className="mt-5 space-y-2 border-t border-[var(--app-border)] pt-4">
-                  <label className="text-xs font-medium text-[var(--app-muted)]">
-                    Add a friend by handle
-                  </label>
-                  <div className="flex flex-col gap-2 sm:flex-row">
-                    <input
-                      type="text"
-                      className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
-                      placeholder="@their_handle"
-                      value={requestHandleDraft}
-                      onChange={(e) => setRequestHandleDraft(e.target.value)}
-                      maxLength={32}
-                      autoCapitalize="none"
-                      autoCorrect="off"
-                      spellCheck={false}
-                    />
-                    <button
-                      type="button"
-                      className="min-h-10 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-4 py-2 text-sm font-medium text-[var(--foreground)]"
-                      onClick={() => void sendFriendRequest()}
-                    >
-                      Send request
-                    </button>
-                  </div>
-                </div>
-
-                {friendsState.incoming.length > 0 ? (
-                  <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                      Incoming
-                    </p>
-                    <ul className="mt-2 space-y-2">
-                      {friendsState.incoming.map((r) => (
-                        <li
-                          key={r.id}
-                          className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 p-3 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <span className="text-sm text-[var(--foreground)]">
-                            {r.from.label}
-                            {r.from.handle ? (
-                              <span className="text-[var(--app-muted)]">
-                                {" "}
-                                · @{r.from.handle}
-                              </span>
-                            ) : null}
-                          </span>
-                          <div className="flex gap-2">
-                            <button
-                              type="button"
-                              className="min-h-9 rounded-lg bg-[var(--app-accent)] px-3 py-2 text-xs font-medium text-white"
-                              onClick={() => void acceptRequest(r.id)}
-                            >
-                              Accept
-                            </button>
-                            <button
-                              type="button"
-                              className="min-h-9 rounded-lg border border-[var(--app-border)] px-3 py-2 text-xs text-[var(--foreground)]"
-                              onClick={() => void rejectRequest(r.id)}
-                            >
-                              Decline
-                            </button>
-                          </div>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {friendsState.outgoing.length > 0 ? (
-                  <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                      Pending
-                    </p>
-                    <ul className="mt-2 space-y-2">
-                      {friendsState.outgoing.map((r) => (
-                        <li
-                          key={r.id}
-                          className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
-                        >
-                          <span className="text-sm text-[var(--app-muted)]">
-                            Waiting on {r.to.label}
-                            {r.to.handle ? ` (@${r.to.handle})` : ""}
-                          </span>
-                          <button
-                            type="button"
-                            className="min-h-8 shrink-0 text-xs text-[var(--app-muted)] underline"
-                            onClick={() => void cancelOutgoingRequest(r.id)}
-                          >
-                            Cancel request
-                          </button>
-                        </li>
-                      ))}
-                    </ul>
-                  </div>
-                ) : null}
-
-                {friendsState.friends.length > 0 ? (
-                  <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                      Your friends
-                    </p>
-                    <ul className="mt-2 space-y-2">
-                      {friendsState.friends.map((f) => {
-                        const leftLabel = f.activeFocusEndsAt
-                          ? focusMinutesLeftLabel(f.activeFocusEndsAt)
-                          : "";
-                        return (
-                        <li
-                          key={f.userId}
-                          className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
-                              {f.label}
-                              {f.handle ? (
-                                <span className="text-[var(--app-muted)]">
-                                  {" "}
-                                  · @{f.handle}
-                                </span>
-                              ) : null}
-                            </span>
-                            <button
-                              type="button"
-                              className={`shrink-0 text-xs underline ${
-                                pendingUnfriendId === f.userId
-                                  ? "font-semibold text-[var(--app-accent)]"
-                                  : "text-[var(--app-muted)]"
-                              }`}
-                              onClick={() => void removeFriend(f.userId)}
-                            >
-                              {pendingUnfriendId === f.userId
-                                ? "Tap again to remove"
-                                : "Remove"}
-                            </button>
-                          </div>
-                          {f.activeFocusEndsAt ? (
-                            <div className="flex items-start gap-2 rounded-md bg-[var(--app-surface-card)]/80 px-2 py-1.5 text-xs text-[var(--app-muted)]">
-                              <span
-                                className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"
-                                aria-hidden
-                              />
-                              <span className="min-w-0 leading-snug">
-                                <span className="text-[var(--foreground)]/90">
-                                  {focusQuipForUser(f.userId)}
-                                </span>
-                                {leftLabel ? (
-                                  <span className="mt-0.5 block text-[var(--app-muted)] sm:mt-0 sm:ml-1 sm:inline">
-                                    {leftLabel}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </div>
-                          ) : null}
-                        </li>
-                        );
-                      })}
-                    </ul>
-                  </div>
-                ) : null}
-
-                <button
-                  type="button"
-                  onClick={() => copyAppLink()}
-                  className="mt-4 w-full text-center text-xs text-[var(--app-muted)] underline"
-                >
-                  Copy invite link (Community tab for new signups)
-                </button>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
-                <WorkEntriesFeed
-                  entries={friendFeed}
-                  displayName=""
-                  variant="friend"
-                  onRefresh={refreshEntryFeeds}
-                  title="Friends&apos; activity"
-                  subtitle="Clap or leave a note on their sessions — they&apos;ll see it in notifications."
-                  emptyMessage={
-                    friendsState.friends.length === 0
-                      ? "Add a friend above to see their activity here."
-                      : "Nothing logged yet — check back after their next session."
-                  }
-                />
-              </div>
-            </>
-          )}
-        </aside>
+        <CommunitySidebar
+          displayName={displayName}
+          workEntries={workEntries}
+          friendFeed={friendFeed}
+          friendsState={friendsState}
+          sidebarTab={sidebarTab}
+          onSidebarTab={setSidebarTab}
+          friendsPanelExpanded={friendsPanelExpanded}
+          onFriendsPanelExpanded={setFriendsPanelExpanded}
+          friendNotice={friendNotice}
+          handleDraft={handleDraft}
+          onHandleDraftChange={setHandleDraft}
+          requestHandleDraft={requestHandleDraft}
+          onRequestHandleDraftChange={setRequestHandleDraft}
+          handleSaving={handleSaving}
+          pendingUnfriendId={pendingUnfriendId}
+          onSaveMyHandle={() => void saveMyHandle()}
+          onSendFriendRequest={() => void sendFriendRequest()}
+          onAcceptRequest={(id) => void acceptRequest(id)}
+          onRejectRequest={(id) => void rejectRequest(id)}
+          onRemoveFriend={(userId) => void removeFriend(userId)}
+          onCancelOutgoing={(id) => void cancelOutgoingRequest(id)}
+          onCopyAppLink={copyAppLink}
+          refreshEntryFeeds={refreshEntryFeeds}
+        />
       </div>
     </div>
   );

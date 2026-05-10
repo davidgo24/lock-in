@@ -132,4 +132,24 @@ export async function getStatsBundle(userId: string) {
   };
 }
 
+/** One query: per-project total duration + last session time (for sidebar labels). */
+export async function getProjectSessionAggregates(userId: string): Promise<{
+  totalSecByProjectId: Record<string, number>;
+  lastSessionAtByProjectId: Record<string, string | null>;
+}> {
+  const rows = await prisma.activitySession.groupBy({
+    by: ["projectId"],
+    where: { project: { is: { userId } } },
+    _sum: { durationSec: true },
+    _max: { createdAt: true },
+  });
+  const totalSecByProjectId: Record<string, number> = {};
+  const lastSessionAtByProjectId: Record<string, string | null> = {};
+  for (const r of rows) {
+    totalSecByProjectId[r.projectId] = r._sum?.durationSec ?? 0;
+    lastSessionAtByProjectId[r.projectId] = r._max?.createdAt?.toISOString() ?? null;
+  }
+  return { totalSecByProjectId, lastSessionAtByProjectId };
+}
+
 export type StatsBundle = Awaited<ReturnType<typeof getStatsBundle>>;

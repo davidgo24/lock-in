@@ -5,7 +5,7 @@ import { ensureDefaultData } from "@/lib/bootstrap";
 import { getSessionUserId } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { getFriendsState } from "@/lib/friends";
-import { getStatsBundle } from "@/lib/stats";
+import { getStatsBundle, getProjectSessionAggregates } from "@/lib/stats";
 import {
   getFriendFeedForClient,
   getRecentEntriesForClient,
@@ -43,7 +43,7 @@ export default async function Home() {
     archivedAt: Date | null;
   };
 
-  const [projectRowsRaw, initialStats, initialWorkEntries, friendsState, initialFriendFeed] =
+  const [projectRowsRaw, initialStats, initialWorkEntries, friendsState, initialFriendFeed, projectAggs] =
     await Promise.all([
       prisma.project.findMany({
         where: { userId },
@@ -53,6 +53,7 @@ export default async function Home() {
       getRecentEntriesForClient(userId),
       getFriendsState(userId),
       getFriendFeedForClient(userId),
+      getProjectSessionAggregates(userId),
     ]);
 
   const projectRows: SidebarProject[] = projectRowsRaw.map((p) => ({
@@ -65,40 +66,22 @@ export default async function Home() {
   const activeProjectRows = projectRows.filter((p) => p.archivedAt == null);
   const archivedProjectRows = projectRows.filter((p) => p.archivedAt != null);
 
-  const [totals, lastSessions] = await Promise.all([
-    prisma.activitySession.groupBy({
-      by: ["projectId"],
-      where: { project: { is: { userId } } },
-      _sum: { durationSec: true },
-    }),
-    prisma.activitySession.groupBy({
-      by: ["projectId"],
-      where: { project: { is: { userId } } },
-      _max: { createdAt: true },
-    }),
-  ]);
-
-  const totalMap = Object.fromEntries(
-    totals.map((t) => [t.projectId, t._sum?.durationSec ?? 0]),
-  );
-  const lastMap = Object.fromEntries(
-    lastSessions.map((t) => [t.projectId, t._max?.createdAt]),
-  );
+  const { totalSecByProjectId, lastSessionAtByProjectId } = projectAggs;
 
   const initialProjects = activeProjectRows.map((p) => ({
     id: p.id,
     name: p.name,
     isMisc: p.isMisc,
-    totalSec: totalMap[p.id] ?? 0,
-    lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
+    totalSec: totalSecByProjectId[p.id] ?? 0,
+    lastSessionAt: lastSessionAtByProjectId[p.id] ?? null,
   }));
 
   const initialArchivedProjects = archivedProjectRows.map((p) => ({
     id: p.id,
     name: p.name,
     isMisc: p.isMisc,
-    totalSec: totalMap[p.id] ?? 0,
-    lastSessionAt: lastMap[p.id]?.toISOString() ?? null,
+    totalSec: totalSecByProjectId[p.id] ?? 0,
+    lastSessionAt: lastSessionAtByProjectId[p.id] ?? null,
   }));
 
   return (

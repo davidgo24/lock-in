@@ -68,6 +68,7 @@ function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync draft when server refetches social.myComment
     setCommentDraft(social.myComment ?? "");
   }, [social.myComment]);
 

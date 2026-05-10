@@ -1,8 +1,5 @@
 import { NextResponse } from "next/server";
-import {
-  getFriendFeedForClient,
-  getRecentEntriesForClient,
-} from "@/lib/work-entries";
+import { getRecentEntriesForClient } from "@/lib/work-entries";
 import { getSessionUserId } from "@/lib/auth";
 
 export async function GET() {

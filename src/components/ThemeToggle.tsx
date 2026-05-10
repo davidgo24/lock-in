@@ -23,6 +23,7 @@ export function ThemeToggle({
 
   useEffect(() => {
     const t = document.documentElement.getAttribute("data-theme");
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- hydrate toggle from DOM / blocking script theme
     setMode(t === "light" ? "light" : "dark");
   }, []);
 

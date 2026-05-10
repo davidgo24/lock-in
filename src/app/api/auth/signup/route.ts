@@ -3,6 +3,8 @@ import { hash } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultData } from "@/lib/bootstrap";
 import { COOKIE, createSessionToken } from "@/lib/auth";
+import { checkRateLimit, clientKeyFromRequest } from "@/lib/rate-limit";
+import { logWarn } from "@/lib/log";
 
 import { normalizeHandleInput, validateHandle } from "@/lib/handle";
 
@@ -11,8 +13,23 @@ function normalizeEmail(s: string): string {
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const SIGNUP_WINDOW_MS = 60 * 60 * 1000;
+const SIGNUP_MAX = 8;
 
 export async function POST(req: Request) {
+  const ip = clientKeyFromRequest(req);
+  const limited = checkRateLimit(`auth:signup:${ip}`, SIGNUP_MAX, SIGNUP_WINDOW_MS);
+  if (!limited.ok) {
+    logWarn("rate_limit.signup", { ip: ip === "unknown" ? ip : "[redacted]" });
+    return NextResponse.json(
+      { error: "Too many signups from this network. Try again later." },
+      {
+        status: 429,
+        headers: { "Retry-After": String(limited.retryAfterSec) },
+      },
+    );
+  }
+
   let body: {
     email?: string;
     password?: string;

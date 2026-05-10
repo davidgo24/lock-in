@@ -2,11 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { jwtVerify } from "jose";
 import { COOKIE } from "@/lib/auth";
-
-function getKey() {
-  const s = process.env.SESSION_SECRET ?? "";
-  return new TextEncoder().encode(s);
-}
+import { getSessionSecretKeyBytes } from "@/lib/session-key";
 
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
@@ -18,8 +14,9 @@ export async function middleware(req: NextRequest) {
   }
 
   const token = req.cookies.get(COOKIE)?.value;
+  const key = getSessionSecretKeyBytes();
 
-  if (!token || (process.env.SESSION_SECRET?.length ?? 0) < 32) {
+  if (!token || !key) {
     if (pathname.startsWith("/api/")) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -30,7 +27,7 @@ export async function middleware(req: NextRequest) {
   }
 
   try {
-    const { payload } = await jwtVerify(token, getKey(), {
+    const { payload } = await jwtVerify(token, key, {
       algorithms: ["HS256"],
     });
     if (typeof payload.sub !== "string" || !payload.sub) {
