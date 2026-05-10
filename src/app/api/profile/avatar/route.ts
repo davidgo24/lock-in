@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/auth";
-import { AVATAR_MAX_BYTES, validateAvatarFile } from "@/lib/avatar";
+import { AVATAR_MAX_BYTES, AVATAR_MAX_MIB, validateAvatarFile } from "@/lib/avatar";
 import { prisma } from "@/lib/prisma";
 
 export async function POST(req: Request) {
@@ -23,7 +23,7 @@ export async function POST(req: Request) {
 
   if (file.size > AVATAR_MAX_BYTES) {
     return NextResponse.json(
-      { error: "Image must be at most 512KB." },
+      { error: `Image must be at most ${AVATAR_MAX_MIB} MB.` },
       { status: 400 },
     );
   }
@@ -34,8 +34,7 @@ export async function POST(req: Request) {
   if (!ok) {
     return NextResponse.json(
       {
-        error:
-          "Use a JPEG, PNG, GIF, or WebP image (512KB max).",
+        error: `Use a JPEG, PNG, GIF, or WebP image (${AVATAR_MAX_MIB} MB max).`,
       },
       { status: 400 },
     );

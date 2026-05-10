@@ -12,6 +12,7 @@ import {
   friendNoticeClass,
   type FriendNotice,
 } from "@/components/activity-app/friend-notice-styles";
+import { AVATAR_MAX_MIB } from "@/lib/avatar";
 
 function FriendMiniAvatar(props: {
   userId: string;
@@ -68,6 +69,8 @@ export type CommunitySidebarProps = {
   pendingUnfriendId: string | null;
   onSaveMyHandle: () => void;
   onSendFriendRequest: () => void;
+  friendRequestBusy: boolean;
+  onSendFriendRequestToHandle: (handle: string) => void;
   onAcceptRequest: (requestId: string) => void;
   onRejectRequest: (requestId: string) => void;
   onRemoveFriend: (userId: string) => void;
@@ -99,6 +102,8 @@ export function CommunitySidebar({
   pendingUnfriendId,
   onSaveMyHandle,
   onSendFriendRequest,
+  friendRequestBusy,
+  onSendFriendRequestToHandle,
   onAcceptRequest,
   onRejectRequest,
   onRemoveFriend,
@@ -384,7 +389,7 @@ export function CommunitySidebar({
                   Profile photo
                 </label>
                 <p className="text-xs text-[var(--app-muted)]">
-                  JPEG, PNG, GIF, or WebP — max 512KB. Friends see this next to
+                  JPEG, PNG, GIF, or WebP — max {AVATAR_MAX_MIB} MB. Friends see this next to
                   your activity.
                 </p>
                 <div className="flex flex-wrap items-center gap-3">
@@ -486,13 +491,65 @@ export function CommunitySidebar({
                   />
                   <button
                     type="button"
-                    className="min-h-10 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-4 py-2 text-sm font-medium text-[var(--foreground)]"
+                    className="min-h-10 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-4 py-2 text-sm font-medium text-[var(--foreground)] disabled:opacity-50"
                     onClick={onSendFriendRequest}
+                    disabled={friendRequestBusy}
                   >
-                    Send request
+                    {friendRequestBusy ? "…" : "Send request"}
                   </button>
                 </div>
               </div>
+
+              {friendsState.suggestions.length > 0 ? (
+                <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                    Suggested
+                  </p>
+                  <p className="mt-1 text-xs leading-snug text-[var(--app-muted)]">
+                    Friends of your friends — tap Invite to send the same
+                    request you&apos;d send from their @handle.
+                  </p>
+                  <ul className="mt-3 space-y-2">
+                    {friendsState.suggestions.map((s) => (
+                      <li
+                        key={s.userId}
+                        className="flex items-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
+                      >
+                        <FriendMiniAvatar
+                          userId={s.userId}
+                          hasAvatar={s.hasAvatar}
+                          initial={
+                            s.label.trim().charAt(0).toUpperCase() || "?"
+                          }
+                          cacheBust={avatarCacheBust}
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                            {s.label}
+                            <span className="font-normal text-[var(--app-muted)]">
+                              {" "}
+                              · @{s.handle}
+                            </span>
+                          </p>
+                          <p className="text-xs text-[var(--app-muted)]">
+                            Also friends with {s.viaLabel}
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={friendRequestBusy}
+                          onClick={() =>
+                            void onSendFriendRequestToHandle(s.handle)
+                          }
+                          className="shrink-0 rounded-lg bg-[var(--app-accent)] px-3 py-2 text-xs font-medium text-white disabled:opacity-50"
+                        >
+                          {friendRequestBusy ? "…" : "Invite"}
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
 
               {friendsState.incoming.length > 0 ? (
                 <div className="mt-4 border-t border-[var(--app-border)] pt-4">

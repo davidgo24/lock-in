@@ -1,5 +1,6 @@
-/** Max uploaded avatar size before validation (bytes). */
-export const AVATAR_MAX_BYTES = 512 * 1024;
+/** Max avatar upload size (8 MiB — typical phone photos exceed 512KB). */
+export const AVATAR_MAX_MIB = 8;
+export const AVATAR_MAX_BYTES = AVATAR_MAX_MIB * 1024 * 1024;
 
 const JPEG = [0xff, 0xd8, 0xff] as const;
 const PNG = [0x89, 0x50, 0x4e, 0x47] as const;

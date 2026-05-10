@@ -52,6 +52,16 @@ export type FriendsStatePayload = {
     /** Their current focus area label while the timer is running; null if unknown. */
     activeFocusProjectName: string | null;
   }[];
+  /** Friends-of-friends with a handle — same invite flow as typing their @handle. */
+  suggestions: {
+    userId: string;
+    handle: string;
+    label: string;
+    hasAvatar: boolean;
+    /** Names of your friends who know them (compressed for display). */
+    viaLabel: string;
+    mutualCount: number;
+  }[];
   incoming: {
     id: string;
     from: { userId: string; handle: string | null; label: string };
@@ -61,6 +71,95 @@ export type FriendsStatePayload = {
     to: { userId: string; handle: string | null; label: string };
   }[];
 };
+
+const MAX_FRIEND_SUGGESTIONS = 10;
+
+/** People your friends know (2nd degree), with a handle, excluding you and existing/pending connections. */
+async function getFriendOfFriendSuggestions(
+  viewerId: string,
+  friendIds: string[],
+  friendLabelById: Map<string, string>,
+  pendingToIds: string[],
+  pendingFromIds: string[],
+): Promise<FriendsStatePayload["suggestions"]> {
+  if (friendIds.length === 0) return [];
+
+  const friendSet = new Set(friendIds);
+  const pendingTo = new Set(pendingToIds);
+  const pendingFrom = new Set(pendingFromIds);
+
+  const edges = await prisma.friendship.findMany({
+    where: {
+      OR: [{ userAId: { in: friendIds } }, { userBId: { in: friendIds } }],
+    },
+    select: { userAId: true, userBId: true },
+  });
+
+  const candidateConnectors = new Map<string, Set<string>>();
+
+  for (const { userAId: a, userBId: b } of edges) {
+    const consider = (connector: string, candidate: string) => {
+      if (candidate === viewerId || friendSet.has(candidate)) return;
+      if (pendingTo.has(candidate) || pendingFrom.has(candidate)) return;
+      let s = candidateConnectors.get(candidate);
+      if (!s) {
+        s = new Set();
+        candidateConnectors.set(candidate, s);
+      }
+      s.add(connector);
+    };
+
+    if (friendSet.has(a)) consider(a, b);
+    if (friendSet.has(b)) consider(b, a);
+  }
+
+  const candidateIds = [...candidateConnectors.keys()];
+  if (candidateIds.length === 0) return [];
+
+  const users = await prisma.user.findMany({
+    where: {
+      id: { in: candidateIds },
+      handle: { not: null },
+    },
+    select: userPublicSelect,
+  });
+
+  const rows: FriendsStatePayload["suggestions"] = [];
+
+  for (const u of users) {
+    if (!u.handle) continue;
+    const connectors = candidateConnectors.get(u.id);
+    if (!connectors || connectors.size === 0) continue;
+    const connLabels = [...connectors]
+      .map((id) => friendLabelById.get(id) ?? "Friend")
+      .sort((x, y) => x.localeCompare(y));
+
+    let viaLabel: string;
+    if (connLabels.length === 1) {
+      viaLabel = connLabels[0];
+    } else if (connLabels.length === 2) {
+      viaLabel = `${connLabels[0]} and ${connLabels[1]}`;
+    } else {
+      viaLabel = `${connLabels[0]} and ${connLabels.length - 1} others`;
+    }
+
+    rows.push({
+      userId: u.id,
+      handle: u.handle,
+      label: publicLabel(u),
+      hasAvatar: u.avatarBytes != null && u.avatarBytes.length > 0,
+      viaLabel,
+      mutualCount: connectors.size,
+    });
+  }
+
+  rows.sort((a, b) => {
+    if (b.mutualCount !== a.mutualCount) return b.mutualCount - a.mutualCount;
+    return a.label.localeCompare(b.label);
+  });
+
+  return rows.slice(0, MAX_FRIEND_SUGGESTIONS);
+}
 
 export async function getFriendsState(userId: string): Promise<FriendsStatePayload> {
   const me = await prisma.user.findUnique({
@@ -77,17 +176,30 @@ export async function getFriendsState(userId: string): Promise<FriendsStatePaylo
           select: friendPublicSelect,
         });
 
-  const incomingRows = await prisma.friendRequest.findMany({
-    where: { toUserId: userId },
-    include: { fromUser: { select: userPublicSelect } },
-    orderBy: { createdAt: "desc" },
-  });
+  const friendLabelById = new Map(
+    friends.map((u) => [u.id, publicLabel(u)] as const),
+  );
 
-  const outgoingRows = await prisma.friendRequest.findMany({
-    where: { fromUserId: userId },
-    include: { toUser: { select: userPublicSelect } },
-    orderBy: { createdAt: "desc" },
-  });
+  const [incomingRows, outgoingRows] = await Promise.all([
+    prisma.friendRequest.findMany({
+      where: { toUserId: userId },
+      include: { fromUser: { select: userPublicSelect } },
+      orderBy: { createdAt: "desc" },
+    }),
+    prisma.friendRequest.findMany({
+      where: { fromUserId: userId },
+      include: { toUser: { select: userPublicSelect } },
+      orderBy: { createdAt: "desc" },
+    }),
+  ]);
+
+  const suggestions = await getFriendOfFriendSuggestions(
+    userId,
+    friendIds,
+    friendLabelById,
+    outgoingRows.map((r) => r.toUser.id),
+    incomingRows.map((r) => r.fromUser.id),
+  );
 
   const now = new Date();
   return {
@@ -112,6 +224,7 @@ export async function getFriendsState(userId: string): Promise<FriendsStatePaylo
         activeFocusProjectName,
       };
     }),
+    suggestions,
     incoming: incomingRows.map((r) => ({
       id: r.id,
       from: {

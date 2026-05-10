@@ -239,6 +239,7 @@ export function ActivityApp({
   const [requestHandleDraft, setRequestHandleDraft] = useState("");
   const [friendNotice, setFriendNotice] = useState<FriendNotice | null>(null);
   const [handleSaving, setHandleSaving] = useState(false);
+  const [friendRequestBusy, setFriendRequestBusy] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"you" | "community">(() =>
     initialFriendsState.incoming.length > 0 ? "community" : "you",
   );
@@ -1063,33 +1064,47 @@ export function ActivityApp({
     }
   }
 
-  async function sendFriendRequest() {
+  async function sendFriendRequestWithHandle(
+    handleInput: string,
+    opts?: { clearDraftOnSuccess?: boolean },
+  ) {
     setFriendNotice(null);
-    const normalized = normalizeHandleInput(requestHandleDraft);
+    const normalized = normalizeHandleInput(handleInput);
     const he = validateHandle(normalized);
     if (he) {
       setFriendNotice({ text: he, kind: "error" });
       return;
     }
-    const res = await fetch("/api/friends/request", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ handle: requestHandleDraft }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setFriendNotice({
-        text:
-          (j as { error?: string }).error ??
-            (res.status === 404 ? "User does not exist." : "Request failed"),
-        kind: "error",
+    setFriendRequestBusy(true);
+    try {
+      const res = await fetch("/api/friends/request", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ handle: handleInput }),
       });
-      return;
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setFriendNotice({
+          text:
+            (j as { error?: string }).error ??
+              (res.status === 404 ? "User does not exist." : "Request failed"),
+          kind: "error",
+        });
+        return;
+      }
+      setFriendsState(j as FriendsStatePayload);
+      if (opts?.clearDraftOnSuccess) setRequestHandleDraft("");
+      setFriendNotice({ text: "Request sent.", kind: "success" });
+      void loadAll();
+    } finally {
+      setFriendRequestBusy(false);
     }
-    setFriendsState(j as FriendsStatePayload);
-    setRequestHandleDraft("");
-    setFriendNotice({ text: "Request sent.", kind: "success" });
-    void loadAll();
+  }
+
+  async function sendFriendRequest() {
+    await sendFriendRequestWithHandle(requestHandleDraft, {
+      clearDraftOnSuccess: true,
+    });
   }
 
   async function acceptRequest(requestId: string) {
@@ -1738,6 +1753,10 @@ export function ActivityApp({
           pendingUnfriendId={pendingUnfriendId}
           onSaveMyHandle={() => void saveMyHandle()}
           onSendFriendRequest={() => void sendFriendRequest()}
+          friendRequestBusy={friendRequestBusy}
+          onSendFriendRequestToHandle={(h) =>
+            void sendFriendRequestWithHandle(h)
+          }
           onAcceptRequest={(id) => void acceptRequest(id)}
           onRejectRequest={(id) => void rejectRequest(id)}
           onRemoveFriend={(userId) => void removeFriend(userId)}
