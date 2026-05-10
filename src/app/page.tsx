@@ -1,3 +1,4 @@
+import { Suspense } from "react";
 import { redirect } from "next/navigation";
 import { ActivityApp } from "@/components/ActivityApp";
 import { ensureDefaultData } from "@/lib/bootstrap";
@@ -89,15 +90,23 @@ export default async function Home() {
 
   return (
     <div className="min-h-dvh w-full max-w-[100vw] overflow-x-clip bg-[var(--background)]">
-      <ActivityApp
-        initialProjects={initialProjects}
-        initialStats={initialStats}
-        initialWorkEntries={initialWorkEntries}
-        initialFriendFeed={initialFriendFeed}
-        initialFriendsState={friendsState}
-        displayName={displayName}
-        appName={appName}
-      />
+      <Suspense
+        fallback={
+          <div className="flex min-h-dvh items-center justify-center text-sm text-[var(--app-muted)]">
+            Loading…
+          </div>
+        }
+      >
+        <ActivityApp
+          initialProjects={initialProjects}
+          initialStats={initialStats}
+          initialWorkEntries={initialWorkEntries}
+          initialFriendFeed={initialFriendFeed}
+          initialFriendsState={friendsState}
+          displayName={displayName}
+          appName={appName}
+        />
+      </Suspense>
     </div>
   );
 }

@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { useSearchParams } from "next/navigation";
 import {
   Clock,
   Flame,
@@ -17,6 +18,7 @@ import {
   RotateCcw,
   Trash2,
   Trophy,
+  X,
 } from "lucide-react";
 import { ContributionHeatmap } from "@/components/ContributionHeatmap";
 import { ThemeToggle } from "@/components/ThemeToggle";
@@ -28,8 +30,20 @@ import {
   playStartCountdown,
   playTimerCompleteRing,
 } from "@/lib/sounds";
+import { normalizeHandleInput, validateHandle } from "@/lib/handle";
 import type { FriendsStatePayload } from "@/lib/friends";
 import type { StatsBundle } from "@/lib/stats";
+
+type FriendNotice = {
+  text: string;
+  kind: "error" | "success" | "info";
+};
+
+function friendNoticeClass(kind: FriendNotice["kind"]): string {
+  if (kind === "error") return "text-red-500";
+  if (kind === "success") return "text-emerald-600";
+  return "text-[var(--foreground)]/90";
+}
 
 type Project = {
   id: string;
@@ -170,6 +184,7 @@ export function ActivityApp({
   displayName,
   appName,
 }: ActivityAppProps) {
+  const searchParams = useSearchParams();
   const [projects, setProjects] = useState<Project[]>(initialProjects);
   const [stats, setStats] = useState<StatsBundle>(initialStats);
   const [selectedId, setSelectedId] = useState(() =>
@@ -212,8 +227,25 @@ export function ActivityApp({
     initialFriendsState.myHandle ?? "",
   );
   const [requestHandleDraft, setRequestHandleDraft] = useState("");
-  const [friendMsg, setFriendMsg] = useState<string | null>(null);
+  const [friendNotice, setFriendNotice] = useState<FriendNotice | null>(null);
   const [handleSaving, setHandleSaving] = useState(false);
+  const [sidebarTab, setSidebarTab] = useState<"you" | "community">("you");
+  const [dashNotice, setDashNotice] = useState<FriendNotice | null>(null);
+  const [pendingDiscard, setPendingDiscard] = useState(false);
+  const pendingDiscardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [pendingDeleteId, setPendingDeleteId] = useState<string | null>(null);
+  const pendingDeleteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const [pendingUnfriendId, setPendingUnfriendId] = useState<string | null>(
+    null,
+  );
+  const pendingUnfriendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
+  const prevIncomingCountRef = useRef(initialFriendsState.incoming.length);
 
   const loadAll = useCallback(async () => {
     const [pRes, sRes, eRes, fRes, ffRes] = await Promise.all([
@@ -323,6 +355,46 @@ export function ActivityApp({
       const misc = (pJson.projects ?? []).find((x: Project) => x.isMisc);
       return misc?.id ?? (pJson.projects?.[0]?.id ?? "");
     });
+  }, []);
+
+  useLayoutEffect(() => {
+    if (initialFriendsState.incoming.length > 0) {
+      setSidebarTab("community");
+    }
+  }, [initialFriendsState.incoming.length]);
+
+  useLayoutEffect(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "community") {
+      setSidebarTab("community");
+    }
+    if (typeof window !== "undefined" && tab) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete("tab");
+      window.history.replaceState(null, "", url.pathname + url.search);
+    }
+  }, [searchParams]);
+
+  useEffect(() => {
+    const n = friendsState.incoming.length;
+    if (n > prevIncomingCountRef.current) {
+      setSidebarTab("community");
+    }
+    prevIncomingCountRef.current = n;
+  }, [friendsState.incoming.length]);
+
+  useEffect(() => {
+    return () => {
+      if (pendingDiscardTimerRef.current) {
+        clearTimeout(pendingDiscardTimerRef.current);
+      }
+      if (pendingDeleteTimerRef.current) {
+        clearTimeout(pendingDeleteTimerRef.current);
+      }
+      if (pendingUnfriendTimerRef.current) {
+        clearTimeout(pendingUnfriendTimerRef.current);
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -461,6 +533,12 @@ export function ActivityApp({
 
   async function startTimer() {
     if (!selectedId || running || showSave || arming) return;
+    if (pendingDiscardTimerRef.current) {
+      clearTimeout(pendingDiscardTimerRef.current);
+      pendingDiscardTimerRef.current = null;
+    }
+    setPendingDiscard(false);
+    setDashNotice(null);
     setArming(true);
     const capturedPresetIdx = presetIdx;
     try {
@@ -490,8 +568,39 @@ export function ActivityApp({
     }
   }
 
+  function onDiscardTap() {
+    if (!running) return;
+    if (!pendingDiscard) {
+      setPendingDiscard(true);
+      setDashNotice({
+        text: "Tap Discard again within a few seconds to cancel this session (nothing saved).",
+        kind: "info",
+      });
+      if (pendingDiscardTimerRef.current) {
+        clearTimeout(pendingDiscardTimerRef.current);
+      }
+      pendingDiscardTimerRef.current = setTimeout(() => {
+        setPendingDiscard(false);
+        pendingDiscardTimerRef.current = null;
+      }, 5000);
+      return;
+    }
+    if (pendingDiscardTimerRef.current) {
+      clearTimeout(pendingDiscardTimerRef.current);
+      pendingDiscardTimerRef.current = null;
+    }
+    setPendingDiscard(false);
+    setDashNotice(null);
+    discardSession();
+  }
+
   function discardSession() {
     if (!running) return;
+    if (pendingDiscardTimerRef.current) {
+      clearTimeout(pendingDiscardTimerRef.current);
+      pendingDiscardTimerRef.current = null;
+    }
+    setPendingDiscard(false);
     clearTick();
     timerEndsAtRef.current = null;
     clearTimerStorage();
@@ -501,6 +610,11 @@ export function ActivityApp({
 
   function stopAndLogSession() {
     if (!running) return;
+    if (pendingDiscardTimerRef.current) {
+      clearTimeout(pendingDiscardTimerRef.current);
+      pendingDiscardTimerRef.current = null;
+    }
+    setPendingDiscard(false);
     const total = durationSecRef.current;
     const end = timerEndsAtRef.current;
     const rem =
@@ -514,7 +628,10 @@ export function ActivityApp({
       clearTimerStorage();
       setRunning(false);
       setRemaining(total);
-      alert("Work a little longer before logging, or tap Discard.");
+      setDashNotice({
+        text: "Work a little longer before logging, or tap Discard.",
+        kind: "error",
+      });
       return;
     }
     clearTick();
@@ -551,9 +668,13 @@ export function ActivityApp({
       });
       if (!res.ok) {
         const j = await res.json().catch(() => ({}));
-        alert((j as { error?: string }).error ?? "Could not save");
+        setDashNotice({
+          text: (j as { error?: string }).error ?? "Could not save",
+          kind: "error",
+        });
         return;
       }
+      setDashNotice(null);
       setShowSave(false);
       setSummary("");
       completedMeta.current = null;
@@ -583,9 +704,33 @@ export function ActivityApp({
   }
 
   async function deleteProject(id: string) {
-    if (!confirm("Delete this project and its saved history?")) return;
+    if (running || arming) return;
+    if (pendingDeleteId !== id) {
+      if (pendingDeleteTimerRef.current) {
+        clearTimeout(pendingDeleteTimerRef.current);
+      }
+      setPendingDeleteId(id);
+      setDashNotice({
+        text: "Tap the trash icon again to permanently delete this project and its history.",
+        kind: "info",
+      });
+      pendingDeleteTimerRef.current = setTimeout(() => {
+        setPendingDeleteId(null);
+        pendingDeleteTimerRef.current = null;
+      }, 5000);
+      return;
+    }
+    if (pendingDeleteTimerRef.current) {
+      clearTimeout(pendingDeleteTimerRef.current);
+      pendingDeleteTimerRef.current = null;
+    }
+    setPendingDeleteId(null);
+    setDashNotice(null);
     const res = await fetch(`/api/projects/${id}`, { method: "DELETE" });
-    if (!res.ok) return;
+    if (!res.ok) {
+      setDashNotice({ text: "Could not delete project.", kind: "error" });
+      return;
+    }
     void loadAll();
   }
 
@@ -621,19 +766,33 @@ export function ActivityApp({
   const selectedProject = projects.find((p) => p.id === selectedId);
 
   function copyAppLink() {
-    const url = typeof window !== "undefined" ? window.location.origin : "";
+    const origin =
+      typeof window !== "undefined" ? window.location.origin : "";
+    const url = `${origin}/?tab=community`;
     void navigator.clipboard.writeText(url).then(
       () => {
-        alert("App link copied.");
+        setFriendNotice({
+          text: "Invite link copied — opens Community for new signups.",
+          kind: "success",
+        });
       },
       () => {
-        alert(url);
+        setFriendNotice({
+          text: `Could not copy. Send them: ${url}`,
+          kind: "info",
+        });
       },
     );
   }
 
   async function saveMyHandle() {
-    setFriendMsg(null);
+    setFriendNotice(null);
+    const normalized = normalizeHandleInput(handleDraft);
+    const he = validateHandle(normalized);
+    if (he) {
+      setFriendNotice({ text: he, kind: "error" });
+      return;
+    }
     setHandleSaving(true);
     try {
       const res = await fetch("/api/profile", {
@@ -643,18 +802,31 @@ export function ActivityApp({
       });
       const j = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setFriendMsg((j as { error?: string }).error ?? "Could not save handle");
+        setFriendNotice({
+          text:
+            (j as { error?: string }).error ?? "Could not save handle",
+          kind: "error",
+        });
         return;
       }
       await loadAll();
-      setFriendMsg("Handle saved — friends can find you.");
+      setFriendNotice({
+        text: "Handle saved — friends can find you.",
+        kind: "success",
+      });
     } finally {
       setHandleSaving(false);
     }
   }
 
   async function sendFriendRequest() {
-    setFriendMsg(null);
+    setFriendNotice(null);
+    const normalized = normalizeHandleInput(requestHandleDraft);
+    const he = validateHandle(normalized);
+    if (he) {
+      setFriendNotice({ text: he, kind: "error" });
+      return;
+    }
     const res = await fetch("/api/friends/request", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -662,17 +834,22 @@ export function ActivityApp({
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setFriendMsg((j as { error?: string }).error ?? "Request failed");
+      setFriendNotice({
+        text:
+          (j as { error?: string }).error ??
+            (res.status === 404 ? "User does not exist." : "Request failed"),
+        kind: "error",
+      });
       return;
     }
     setFriendsState(j as FriendsStatePayload);
     setRequestHandleDraft("");
-    setFriendMsg("Request sent.");
+    setFriendNotice({ text: "Request sent.", kind: "success" });
     void loadAll();
   }
 
   async function acceptRequest(requestId: string) {
-    setFriendMsg(null);
+    setFriendNotice(null);
     const res = await fetch("/api/friends/accept", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -680,16 +857,22 @@ export function ActivityApp({
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setFriendMsg((j as { error?: string }).error ?? "Could not accept");
+      setFriendNotice({
+        text: (j as { error?: string }).error ?? "Could not accept",
+        kind: "error",
+      });
       return;
     }
     setFriendsState(j as FriendsStatePayload);
-    setFriendMsg("You're connected — their sessions show below.");
+    setFriendNotice({
+      text: "You're connected — their sessions show below.",
+      kind: "success",
+    });
     void loadAll();
   }
 
   async function rejectRequest(requestId: string) {
-    setFriendMsg(null);
+    setFriendNotice(null);
     const res = await fetch("/api/friends/reject", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -697,27 +880,73 @@ export function ActivityApp({
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setFriendMsg((j as { error?: string }).error ?? "Could not decline");
+      setFriendNotice({
+        text: (j as { error?: string }).error ?? "Could not decline",
+        kind: "error",
+      });
       return;
     }
     setFriendsState(j as FriendsStatePayload);
+    setFriendNotice({ text: "Request declined.", kind: "info" });
     void loadAll();
   }
 
   async function removeFriend(otherUserId: string) {
-    if (!confirm("Remove this friend? They won't see your sessions and you won't see theirs.")) {
+    if (pendingUnfriendId !== otherUserId) {
+      if (pendingUnfriendTimerRef.current) {
+        clearTimeout(pendingUnfriendTimerRef.current);
+      }
+      setPendingUnfriendId(otherUserId);
+      setDashNotice({
+        text: "Tap Remove again to unfriend — you will stop seeing each other's sessions.",
+        kind: "info",
+      });
+      pendingUnfriendTimerRef.current = setTimeout(() => {
+        setPendingUnfriendId(null);
+        pendingUnfriendTimerRef.current = null;
+      }, 5000);
       return;
     }
-    setFriendMsg(null);
+    if (pendingUnfriendTimerRef.current) {
+      clearTimeout(pendingUnfriendTimerRef.current);
+      pendingUnfriendTimerRef.current = null;
+    }
+    setPendingUnfriendId(null);
+    setFriendNotice(null);
     const res = await fetch(`/api/friends/${otherUserId}`, {
       method: "DELETE",
     });
     const j = await res.json().catch(() => ({}));
     if (!res.ok) {
-      setFriendMsg((j as { error?: string }).error ?? "Could not remove");
+      setFriendNotice({
+        text: (j as { error?: string }).error ?? "Could not remove",
+        kind: "error",
+      });
       return;
     }
     setFriendsState(j as FriendsStatePayload);
+    setDashNotice(null);
+    setFriendNotice({ text: "Removed from friends.", kind: "info" });
+    void loadAll();
+  }
+
+  async function cancelOutgoingRequest(requestId: string) {
+    setFriendNotice(null);
+    const res = await fetch("/api/friends/cancel", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ requestId }),
+    });
+    const j = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      setFriendNotice({
+        text: (j as { error?: string }).error ?? "Could not cancel request",
+        kind: "error",
+      });
+      return;
+    }
+    setFriendsState(j as FriendsStatePayload);
+    setFriendNotice({ text: "Request cancelled.", kind: "info" });
     void loadAll();
   }
 
@@ -844,6 +1073,27 @@ export function ActivityApp({
         </div>
       </header>
 
+      {dashNotice ? (
+        <div
+          className="mt-4 flex items-start gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2.5 text-sm shadow-sm"
+          role={dashNotice.kind === "error" ? "alert" : "status"}
+        >
+          <p
+            className={`min-w-0 flex-1 ${friendNoticeClass(dashNotice.kind)}`}
+          >
+            {dashNotice.text}
+          </p>
+          <button
+            type="button"
+            className="shrink-0 rounded p-1 text-[var(--app-muted)] hover:bg-[var(--background)]"
+            aria-label="Dismiss"
+            onClick={() => setDashNotice(null)}
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      ) : null}
+
       <div className="mt-6 flex flex-col gap-8 xl:grid xl:grid-cols-[260px_minmax(0,1fr)_minmax(0,300px)] xl:items-start xl:gap-8">
         <aside className="order-2 min-w-0 xl:sticky xl:top-4 xl:order-1 xl:self-start">
           <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
@@ -936,7 +1186,11 @@ export function ActivityApp({
                       disabled={running || arming}
                       title="Delete project"
                       onClick={() => void deleteProject(p.id)}
-                      className="shrink-0 rounded p-1.5 text-[var(--app-muted)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40"
+                      className={`shrink-0 rounded p-1.5 text-[var(--app-muted)] hover:bg-red-500/10 hover:text-red-400 disabled:opacity-40 ${
+                        pendingDeleteId === p.id
+                          ? "ring-2 ring-[var(--app-accent)] ring-offset-2 ring-offset-[var(--app-surface-card)]"
+                          : ""
+                      }`}
                     >
                       <Trash2 className="h-3.5 w-3.5" />
                     </button>
@@ -1056,19 +1310,15 @@ export function ActivityApp({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    if (
-                      confirm(
-                        "Discard this session? Nothing will be saved.",
-                      )
-                    ) {
-                      discardSession();
-                    }
-                  }}
-                  className="flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 py-3.5 text-sm font-medium text-[var(--foreground)] active:opacity-90"
+                  onClick={() => onDiscardTap()}
+                  className={`flex min-h-12 min-w-0 flex-1 items-center justify-center gap-2 rounded-xl border py-3.5 text-sm font-medium active:opacity-90 ${
+                    pendingDiscard
+                      ? "border-[var(--app-accent)] bg-[var(--app-accent-muted)] text-[var(--foreground)]"
+                      : "border-[var(--app-border)] bg-[var(--background)]/50 text-[var(--foreground)]"
+                  }`}
                 >
                   <RotateCcw className="h-4 w-4 shrink-0" />
-                  Discard
+                  {pendingDiscard ? "Tap again to discard" : "Discard"}
                 </button>
               </div>
             )}
@@ -1180,198 +1430,278 @@ export function ActivityApp({
         </main>
 
         <aside className="order-3 min-w-0 xl:sticky xl:top-4 xl:self-start">
-          <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm">
-            <h3 className="font-display text-lg text-[var(--foreground)]">
-              Friends
-            </h3>
-            <p className="mt-1 text-sm text-[var(--app-muted)]">
-              Pick a unique handle, then send a request. They accept — you
-              both see each other&apos;s session logs (not one-way follows).
-            </p>
-
-            {friendMsg ? (
-              <p className="mt-3 text-sm text-[var(--foreground)]/90">
-                {friendMsg}
-              </p>
-            ) : null}
-
-            <div className="mt-4 space-y-2">
-              <label className="text-xs font-medium text-[var(--app-muted)]">
-                Your handle
-              </label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  type="text"
-                  className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
-                  placeholder="e.g. alex_codes"
-                  value={handleDraft}
-                  onChange={(e) => setHandleDraft(e.target.value)}
-                  maxLength={30}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  disabled={handleSaving}
-                  className="min-h-10 shrink-0 rounded-lg bg-[var(--app-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
-                  onClick={() => void saveMyHandle()}
-                >
-                  {handleSaving ? "Saving…" : "Save"}
-                </button>
-              </div>
-              <p className="text-xs text-[var(--app-muted)]">
-                3–30 characters: lowercase letters, numbers, underscores. Used
-                so friends can find you — not your password.
-              </p>
-            </div>
-
-            <div className="mt-5 space-y-2 border-t border-[var(--app-border)] pt-4">
-              <label className="text-xs font-medium text-[var(--app-muted)]">
-                Add a friend by handle
-              </label>
-              <div className="flex flex-col gap-2 sm:flex-row">
-                <input
-                  type="text"
-                  className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
-                  placeholder="@their_handle"
-                  value={requestHandleDraft}
-                  onChange={(e) => setRequestHandleDraft(e.target.value)}
-                  maxLength={32}
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
-                <button
-                  type="button"
-                  className="min-h-10 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-4 py-2 text-sm font-medium text-[var(--foreground)]"
-                  onClick={() => void sendFriendRequest()}
-                >
-                  Send request
-                </button>
-              </div>
-            </div>
-
-            {friendsState.incoming.length > 0 ? (
-              <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                  Incoming
-                </p>
-                <ul className="mt-2 space-y-2">
-                  {friendsState.incoming.map((r) => (
-                    <li
-                      key={r.id}
-                      className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 p-3 sm:flex-row sm:items-center sm:justify-between"
-                    >
-                      <span className="text-sm text-[var(--foreground)]">
-                        {r.from.label}
-                        {r.from.handle ? (
-                          <span className="text-[var(--app-muted)]">
-                            {" "}
-                            · @{r.from.handle}
-                          </span>
-                        ) : null}
-                      </span>
-                      <div className="flex gap-2">
-                        <button
-                          type="button"
-                          className="min-h-9 rounded-lg bg-[var(--app-accent)] px-3 py-2 text-xs font-medium text-white"
-                          onClick={() => void acceptRequest(r.id)}
-                        >
-                          Accept
-                        </button>
-                        <button
-                          type="button"
-                          className="min-h-9 rounded-lg border border-[var(--app-border)] px-3 py-2 text-xs text-[var(--foreground)]"
-                          onClick={() => void rejectRequest(r.id)}
-                        >
-                          Decline
-                        </button>
-                      </div>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {friendsState.outgoing.length > 0 ? (
-              <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                  Pending
-                </p>
-                <ul className="mt-2 space-y-1">
-                  {friendsState.outgoing.map((r) => (
-                    <li
-                      key={r.id}
-                      className="text-sm text-[var(--app-muted)]"
-                    >
-                      Waiting on {r.to.label}
-                      {r.to.handle ? ` (@${r.to.handle})` : ""}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
-            {friendsState.friends.length > 0 ? (
-              <div className="mt-4 border-t border-[var(--app-border)] pt-4">
-                <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                  Your friends
-                </p>
-                <ul className="mt-2 space-y-2">
-                  {friendsState.friends.map((f) => (
-                    <li
-                      key={f.userId}
-                      className="flex items-center justify-between gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
-                    >
-                      <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
-                        {f.label}
-                        {f.handle ? (
-                          <span className="text-[var(--app-muted)]">
-                            {" "}
-                            · @{f.handle}
-                          </span>
-                        ) : null}
-                      </span>
-                      <button
-                        type="button"
-                        className="shrink-0 text-xs text-[var(--app-muted)] underline"
-                        onClick={() => void removeFriend(f.userId)}
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            ) : null}
-
+          <div
+            className="mb-3 flex gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-1 shadow-sm"
+            role="tablist"
+            aria-label="Activity sidebar"
+          >
             <button
               type="button"
-              onClick={() => copyAppLink()}
-              className="mt-4 w-full text-center text-xs text-[var(--app-muted)] underline"
+              role="tab"
+              aria-selected={sidebarTab === "you"}
+              className={`min-h-10 flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                sidebarTab === "you"
+                  ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
+                  : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
+              }`}
+              onClick={() => setSidebarTab("you")}
             >
-              Copy app URL (so they can sign up)
+              You
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={sidebarTab === "community"}
+              className={`relative min-h-10 flex-1 rounded-lg px-3 py-2 text-sm font-medium transition ${
+                sidebarTab === "community"
+                  ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
+                  : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
+              }`}
+              onClick={() => setSidebarTab("community")}
+            >
+              Community
+              {friendsState.incoming.length > 0 ? (
+                <span
+                  className="ml-1 inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-[var(--app-accent)] px-1 text-[10px] font-semibold text-white"
+                  aria-label={`${friendsState.incoming.length} pending requests`}
+                >
+                  {friendsState.incoming.length}
+                </span>
+              ) : null}
             </button>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
-            <WorkEntriesFeed
-              entries={friendFeed}
-              displayName=""
-              title="Friends&apos; sessions"
-              subtitle="Latest logs from people you&apos;re connected with."
-              emptyMessage={
-                friendsState.friends.length === 0
-                  ? "Add a friend above to see their sessions here."
-                  : "Nothing logged yet — check back after their next sesh."
-              }
-            />
-          </div>
+          {sidebarTab === "you" ? (
+            <div
+              className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5"
+              role="tabpanel"
+            >
+              <WorkEntriesFeed entries={workEntries} displayName={displayName} />
+              <p className="mt-4 text-center text-xs text-[var(--app-muted)]">
+                <button
+                  type="button"
+                  className="text-[var(--app-accent)] underline"
+                  onClick={() => setSidebarTab("community")}
+                >
+                  Community
+                </button>{" "}
+                · friend requests and their sessions
+              </p>
+            </div>
+          ) : (
+            <>
+              <div
+                className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm"
+                role="tabpanel"
+              >
+                <h3 className="font-display text-lg text-[var(--foreground)]">
+                  Friends
+                </h3>
+                <p className="mt-1 text-sm text-[var(--app-muted)]">
+                  Pick a unique handle, then send a request. They accept — you
+                  both see each other&apos;s session logs (not one-way follows).
+                  Friends see your note and project name for each session.
+                </p>
 
-          <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
-            <WorkEntriesFeed entries={workEntries} displayName={displayName} />
-          </div>
+                {friendNotice ? (
+                  <p
+                    className={`mt-3 text-sm ${friendNoticeClass(friendNotice.kind)}`}
+                    role={friendNotice.kind === "error" ? "alert" : undefined}
+                  >
+                    {friendNotice.text}
+                  </p>
+                ) : null}
+
+                <div className="mt-4 space-y-2">
+                  <label className="text-xs font-medium text-[var(--app-muted)]">
+                    Your handle
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                      placeholder="e.g. alex_codes"
+                      value={handleDraft}
+                      onChange={(e) => setHandleDraft(e.target.value)}
+                      maxLength={30}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      disabled={handleSaving}
+                      className="min-h-10 shrink-0 rounded-lg bg-[var(--app-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+                      onClick={() => void saveMyHandle()}
+                    >
+                      {handleSaving ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                  <p className="text-xs text-[var(--app-muted)]">
+                    3–30 characters: lowercase letters, numbers, underscores.
+                    Used so friends can find you — not your password.
+                  </p>
+                </div>
+
+                <div className="mt-5 space-y-2 border-t border-[var(--app-border)] pt-4">
+                  <label className="text-xs font-medium text-[var(--app-muted)]">
+                    Add a friend by handle
+                  </label>
+                  <div className="flex flex-col gap-2 sm:flex-row">
+                    <input
+                      type="text"
+                      className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                      placeholder="@their_handle"
+                      value={requestHandleDraft}
+                      onChange={(e) => setRequestHandleDraft(e.target.value)}
+                      maxLength={32}
+                      autoCapitalize="none"
+                      autoCorrect="off"
+                      spellCheck={false}
+                    />
+                    <button
+                      type="button"
+                      className="min-h-10 shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/50 px-4 py-2 text-sm font-medium text-[var(--foreground)]"
+                      onClick={() => void sendFriendRequest()}
+                    >
+                      Send request
+                    </button>
+                  </div>
+                </div>
+
+                {friendsState.incoming.length > 0 ? (
+                  <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                      Incoming
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {friendsState.incoming.map((r) => (
+                        <li
+                          key={r.id}
+                          className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 p-3 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <span className="text-sm text-[var(--foreground)]">
+                            {r.from.label}
+                            {r.from.handle ? (
+                              <span className="text-[var(--app-muted)]">
+                                {" "}
+                                · @{r.from.handle}
+                              </span>
+                            ) : null}
+                          </span>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              className="min-h-9 rounded-lg bg-[var(--app-accent)] px-3 py-2 text-xs font-medium text-white"
+                              onClick={() => void acceptRequest(r.id)}
+                            >
+                              Accept
+                            </button>
+                            <button
+                              type="button"
+                              className="min-h-9 rounded-lg border border-[var(--app-border)] px-3 py-2 text-xs text-[var(--foreground)]"
+                              onClick={() => void rejectRequest(r.id)}
+                            >
+                              Decline
+                            </button>
+                          </div>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {friendsState.outgoing.length > 0 ? (
+                  <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                      Pending
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {friendsState.outgoing.map((r) => (
+                        <li
+                          key={r.id}
+                          className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2 sm:flex-row sm:items-center sm:justify-between"
+                        >
+                          <span className="text-sm text-[var(--app-muted)]">
+                            Waiting on {r.to.label}
+                            {r.to.handle ? ` (@${r.to.handle})` : ""}
+                          </span>
+                          <button
+                            type="button"
+                            className="min-h-8 shrink-0 text-xs text-[var(--app-muted)] underline"
+                            onClick={() => void cancelOutgoingRequest(r.id)}
+                          >
+                            Cancel request
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                {friendsState.friends.length > 0 ? (
+                  <div className="mt-4 border-t border-[var(--app-border)] pt-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+                      Your friends
+                    </p>
+                    <ul className="mt-2 space-y-2">
+                      {friendsState.friends.map((f) => (
+                        <li
+                          key={f.userId}
+                          className="flex items-center justify-between gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
+                        >
+                          <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
+                            {f.label}
+                            {f.handle ? (
+                              <span className="text-[var(--app-muted)]">
+                                {" "}
+                                · @{f.handle}
+                              </span>
+                            ) : null}
+                          </span>
+                          <button
+                            type="button"
+                            className={`shrink-0 text-xs underline ${
+                              pendingUnfriendId === f.userId
+                                ? "font-semibold text-[var(--app-accent)]"
+                                : "text-[var(--app-muted)]"
+                            }`}
+                            onClick={() => void removeFriend(f.userId)}
+                          >
+                            {pendingUnfriendId === f.userId
+                              ? "Tap again to remove"
+                              : "Remove"}
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                ) : null}
+
+                <button
+                  type="button"
+                  onClick={() => copyAppLink()}
+                  className="mt-4 w-full text-center text-xs text-[var(--app-muted)] underline"
+                >
+                  Copy invite link (Community tab for new signups)
+                </button>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
+                <WorkEntriesFeed
+                  entries={friendFeed}
+                  displayName=""
+                  title="Friends&apos; sessions"
+                  subtitle="Latest logs from people you&apos;re connected with."
+                  emptyMessage={
+                    friendsState.friends.length === 0
+                      ? "Add a friend above to see their sessions here."
+                      : "Nothing logged yet — check back after their next sesh."
+                  }
+                />
+              </div>
+            </>
+          )}
         </aside>
       </div>
     </div>

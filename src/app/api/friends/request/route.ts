@@ -1,10 +1,6 @@
 import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/auth";
-import {
-  areFriends,
-  friendshipKeyPair,
-  getFriendsState,
-} from "@/lib/friends";
+import { areFriends, getFriendsState } from "@/lib/friends";
 import { normalizeHandleInput, validateHandle } from "@/lib/handle";
 import { prisma } from "@/lib/prisma";
 
@@ -34,7 +30,10 @@ export async function POST(req: Request) {
   });
 
   if (!target) {
-    return NextResponse.json({ error: "No user with that handle." }, { status: 404 });
+    return NextResponse.json(
+      { error: "User does not exist." },
+      { status: 404 },
+    );
   }
 
   if (target.id === userId) {
