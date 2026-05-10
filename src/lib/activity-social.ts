@@ -7,7 +7,7 @@ const COMMENT_MAX = 500;
 export type ActivitySocialPayload = {
   clapCount: number;
   clappedByMe: boolean;
-  comments: { authorLabel: string; body: string }[];
+  comments: { authorLabel: string; body: string; createdAt: string }[];
   myComment: string | null;
 };
 
@@ -157,6 +157,7 @@ const commentUserSelect = {
 
 type CommentWithUser = {
   body: string;
+  createdAt: Date;
   user: {
     id: string;
     displayName: string | null;
@@ -164,10 +165,15 @@ type CommentWithUser = {
   };
 };
 
-function mapComment(c: CommentWithUser): { authorLabel: string; body: string } {
+function mapComment(c: CommentWithUser): {
+  authorLabel: string;
+  body: string;
+  createdAt: string;
+} {
   return {
     authorLabel: publicLabel(c.user),
     body: c.body,
+    createdAt: c.createdAt.toISOString(),
   };
 }
 
@@ -191,7 +197,12 @@ export async function getSocialBySessionIds(
     }),
     prisma.activityComment.findMany({
       where: { sessionId: { in: sessionIds } },
-      select: { sessionId: true, body: true, user: { select: commentUserSelect } },
+      select: {
+        sessionId: true,
+        body: true,
+        createdAt: true,
+        user: { select: commentUserSelect },
+      },
       orderBy: { createdAt: "asc" },
     }),
     prisma.activityComment.findMany({
@@ -210,7 +221,7 @@ export async function getSocialBySessionIds(
 
   const commentsBySession = new Map<
     string,
-    { authorLabel: string; body: string }[]
+    { authorLabel: string; body: string; createdAt: string }[]
   >();
   for (const sid of sessionIds) commentsBySession.set(sid, []);
   for (const row of allComments) {

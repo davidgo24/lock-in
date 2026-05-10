@@ -5,7 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 export type ActivitySocial = {
   clapCount: number;
   clappedByMe: boolean;
-  comments: { authorLabel: string; body: string }[];
+  comments: { authorLabel: string; body: string; createdAt: string }[];
   myComment: string | null;
 };
 
@@ -178,7 +178,14 @@ function FriendEntryRow({ e, displayName, onAfterMutation }: FriendEntryProps) {
                   <span className="font-medium text-[var(--foreground)]/90">
                     {c.authorLabel}
                   </span>
-                  <span className="text-[var(--app-muted)]"> · </span>
+                  <span className="text-[var(--app-muted)]">
+                    {" "}
+                    ·{" "}
+                    <span className="tabular-nums">
+                      {formatRelativeTime(c.createdAt)}
+                    </span>
+                    {" · "}
+                  </span>
                   <span className="text-[var(--foreground)]/80">{c.body}</span>
                 </li>
               ))}
@@ -334,8 +341,19 @@ export function WorkEntriesFeed({
                                 key={`${e.id}-oc-${i}`}
                                 className="rounded-md bg-[var(--app-surface-card)]/80 px-2 py-1.5 text-xs leading-snug text-[var(--foreground)]/85"
                               >
-                                <span className="font-medium">{c.authorLabel}</span>
-                                : {c.body}
+                                <span className="font-medium">
+                                  {c.authorLabel}
+                                </span>
+                                <span className="text-[var(--app-muted)]">
+                                  {" "}
+                                  ·{" "}
+                                  <span className="tabular-nums">
+                                    {formatRelativeTime(c.createdAt)}
+                                  </span>
+                                </span>
+                                <span className="text-[var(--foreground)]/80">
+                                  : {c.body}
+                                </span>
                               </li>
                             ))}
                           </ul>

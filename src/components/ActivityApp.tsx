@@ -316,7 +316,7 @@ function parseWorkEntryFromApi(e: {
   social?: {
     clapCount: number;
     clappedByMe: boolean;
-    comments: { authorLabel: string; body: string }[];
+    comments: { authorLabel: string; body: string; createdAt: string }[];
     myComment: string | null;
   };
 }): WorkEntryRow {
