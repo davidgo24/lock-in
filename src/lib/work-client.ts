@@ -23,7 +23,13 @@ export type ApiWorkEntry = {
   social?: {
     clapCount: number;
     clappedByMe: boolean;
-    comments: { authorLabel: string; body: string; createdAt: string }[];
+    comments: {
+      authorLabel: string;
+      authorUserId: string;
+      authorHasAvatar: boolean;
+      body: string;
+      createdAt: string;
+    }[];
     myComment: string | null;
   };
 };

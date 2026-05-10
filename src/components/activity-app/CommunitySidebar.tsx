@@ -6,10 +6,7 @@ import {
   WorkEntriesFeed,
   type WorkEntryRow,
 } from "@/components/WorkEntriesFeed";
-import {
-  focusMinutesLeftLabel,
-  focusQuipForUser,
-} from "@/lib/focus-quips";
+import { focusMinutesLeftLabel } from "@/lib/focus-quips";
 import type { FriendsStatePayload } from "@/lib/friends";
 import {
   friendNoticeClass,
@@ -110,6 +107,17 @@ export function CommunitySidebar({
   refreshEntryFeeds,
 }: CommunitySidebarProps) {
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [communitySubTab, setCommunitySubTab] = useState<"live" | "friends">(
+    "live",
+  );
+
+  const focusingFriends = [...friendsState.friends]
+    .filter((f) => f.activeFocusEndsAt)
+    .sort(
+      (a, b) =>
+        new Date(a.activeFocusEndsAt!).getTime() -
+        new Date(b.activeFocusEndsAt!).getTime(),
+    );
   return (
     <aside className="order-3 min-w-0 xl:sticky xl:top-4 xl:self-start">
       <div
@@ -182,7 +190,131 @@ export function CommunitySidebar({
         </div>
       ) : (
         <>
-          {friendsPanelExpanded ? (
+          <div
+            className="mb-3 flex gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-1 shadow-sm"
+            role="tablist"
+            aria-label="Community sections"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={communitySubTab === "live"}
+              className={`min-h-9 flex-1 rounded-lg px-2 py-2 text-xs font-medium transition sm:text-sm ${
+                communitySubTab === "live"
+                  ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
+                  : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
+              }`}
+              onClick={() => setCommunitySubTab("live")}
+            >
+              Online now
+              {focusingFriends.length > 0 ? (
+                <span className="ml-1 tabular-nums text-[10px] font-semibold text-emerald-600 dark:text-emerald-400 sm:text-xs">
+                  ({focusingFriends.length})
+                </span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={communitySubTab === "friends"}
+              className={`relative min-h-9 flex-1 rounded-lg px-2 py-2 text-xs font-medium transition sm:text-sm ${
+                communitySubTab === "friends"
+                  ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
+                  : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
+              }`}
+              onClick={() => setCommunitySubTab("friends")}
+            >
+              Friends
+              {friendsState.incoming.length > 0 ? (
+                <span
+                  className="ml-1 inline-flex min-w-[1.125rem] items-center justify-center rounded-full bg-[var(--app-accent)] px-1 text-[10px] font-semibold text-white"
+                  aria-label={`${friendsState.incoming.length} pending requests`}
+                >
+                  {friendsState.incoming.length}
+                </span>
+              ) : null}
+            </button>
+          </div>
+
+          {communitySubTab === "live" ? (
+            <div
+              className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5"
+              role="tabpanel"
+            >
+              <p className="font-display text-base text-[var(--foreground)]">
+                Online now
+              </p>
+              <p className="mt-0.5 text-xs leading-snug text-[var(--app-muted)]">
+                Friends with an active timer — focus area updates while they
+                work.
+              </p>
+              {friendsState.friends.length === 0 ? (
+                <p className="mt-4 text-sm text-[var(--app-muted)]">
+                  Add people from the{" "}
+                  <button
+                    type="button"
+                    className="font-medium text-[var(--app-accent)] underline"
+                    onClick={() => setCommunitySubTab("friends")}
+                  >
+                    Friends
+                  </button>{" "}
+                  tab to see when they&apos;re in focus.
+                </p>
+              ) : focusingFriends.length === 0 ? (
+                <p className="mt-4 text-sm text-[var(--app-muted)]">
+                  No one&apos;s in focus right now. Check back when a friend
+                  starts their timer.
+                </p>
+              ) : (
+                <ul className="mt-4 space-y-2">
+                  {focusingFriends.map((f) => (
+                    <li
+                      key={f.userId}
+                      className="flex gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2.5"
+                    >
+                      <FriendMiniAvatar
+                        userId={f.userId}
+                        hasAvatar={f.hasAvatar}
+                        initial={
+                          f.label.trim().charAt(0).toUpperCase() || "?"
+                        }
+                        cacheBust={avatarCacheBust}
+                      />
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-medium text-[var(--foreground)]">
+                          {f.label}
+                          {f.handle ? (
+                            <span className="font-normal text-[var(--app-muted)]">
+                              {" "}
+                              · @{f.handle}
+                            </span>
+                          ) : null}
+                        </p>
+                        <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--app-muted)]">
+                          <span
+                            className="inline-flex items-center gap-1.5 text-[var(--foreground)]/90"
+                          >
+                            <span
+                              className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"
+                              aria-hidden
+                            />
+                            <span className="min-w-0 font-medium">
+                              {f.activeFocusProjectName ?? "Focus session"}
+                            </span>
+                          </span>
+                          {f.activeFocusEndsAt ? (
+                            <span className="tabular-nums">
+                              {focusMinutesLeftLabel(f.activeFocusEndsAt)}
+                            </span>
+                          ) : null}
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ) : friendsPanelExpanded ? (
             <div
               className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm"
               role="tabpanel"
@@ -438,70 +570,45 @@ export function CommunitySidebar({
                     Your friends
                   </p>
                   <ul className="mt-2 space-y-2">
-                    {friendsState.friends.map((f) => {
-                      const leftLabel = f.activeFocusEndsAt
-                        ? focusMinutesLeftLabel(f.activeFocusEndsAt)
-                        : "";
-                      return (
+                    {friendsState.friends.map((f) => (
                         <li
                           key={f.userId}
-                          className="flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
+                          className="flex items-center justify-between gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="flex min-w-0 flex-1 items-center gap-2">
-                              <FriendMiniAvatar
-                                userId={f.userId}
-                                hasAvatar={f.hasAvatar}
-                                initial={
-                                  f.label.trim().charAt(0).toUpperCase() || "?"
-                                }
-                                cacheBust={avatarCacheBust}
-                              />
-                              <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
-                                {f.label}
-                                {f.handle ? (
-                                  <span className="text-[var(--app-muted)]">
-                                    {" "}
-                                    · @{f.handle}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </div>
-                            <button
-                              type="button"
-                              className={`shrink-0 text-xs underline ${
-                                pendingUnfriendId === f.userId
-                                  ? "font-semibold text-[var(--app-accent)]"
-                                  : "text-[var(--app-muted)]"
-                              }`}
-                              onClick={() => onRemoveFriend(f.userId)}
-                            >
-                              {pendingUnfriendId === f.userId
-                                ? "Tap again to remove"
-                                : "Remove"}
-                            </button>
-                          </div>
-                          {f.activeFocusEndsAt ? (
-                            <div className="flex items-start gap-2 rounded-md bg-[var(--app-surface-card)]/80 px-2 py-1.5 text-xs text-[var(--app-muted)]">
-                              <span
-                                className="mt-1 h-2 w-2 shrink-0 animate-pulse rounded-full bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.6)]"
-                                aria-hidden
-                              />
-                              <span className="min-w-0 leading-snug">
-                                <span className="text-[var(--foreground)]/90">
-                                  {focusQuipForUser(f.userId)}
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <FriendMiniAvatar
+                              userId={f.userId}
+                              hasAvatar={f.hasAvatar}
+                              initial={
+                                f.label.trim().charAt(0).toUpperCase() || "?"
+                              }
+                              cacheBust={avatarCacheBust}
+                            />
+                            <span className="min-w-0 truncate text-sm text-[var(--foreground)]">
+                              {f.label}
+                              {f.handle ? (
+                                <span className="text-[var(--app-muted)]">
+                                  {" "}
+                                  · @{f.handle}
                                 </span>
-                                {leftLabel ? (
-                                  <span className="mt-0.5 block text-[var(--app-muted)] sm:mt-0 sm:ml-1 sm:inline">
-                                    {leftLabel}
-                                  </span>
-                                ) : null}
-                              </span>
-                            </div>
-                          ) : null}
+                              ) : null}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            className={`shrink-0 text-xs underline ${
+                              pendingUnfriendId === f.userId
+                                ? "font-semibold text-[var(--app-accent)]"
+                                : "text-[var(--app-muted)]"
+                            }`}
+                            onClick={() => onRemoveFriend(f.userId)}
+                          >
+                            {pendingUnfriendId === f.userId
+                              ? "Tap again to remove"
+                              : "Remove"}
+                          </button>
                         </li>
-                      );
-                    })}
+                    ))}
                   </ul>
                 </div>
               ) : null}
@@ -578,9 +685,7 @@ export function CommunitySidebar({
               avatarCacheBust={avatarCacheBust}
               emptyMessage={
                 friendsState.friends.length === 0
-                  ? friendsPanelExpanded
-                    ? "Add a friend above to see their activity here."
-                    : "Expand Friends to add someone and see their activity here."
+                  ? "Open the Friends tab to add someone and see shared activity here."
                   : "Nothing logged yet — check back after their next session."
               }
             />

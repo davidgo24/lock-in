@@ -142,11 +142,14 @@ function defaultSelectedId(projects: Project[]) {
 }
 
 /** Tell the server when a focus timer is running so friends can see “active” (best-effort). */
-function postFocusStatus(endsAtMs: number | null) {
+function postFocusStatus(endsAtMs: number | null, projectId: string | null = null) {
   const body =
     endsAtMs == null
-      ? { endsAt: null }
-      : { endsAt: new Date(endsAtMs).toISOString() };
+      ? { endsAt: null, projectId: null }
+      : {
+          endsAt: new Date(endsAtMs).toISOString(),
+          projectId: projectId && projectId.length > 0 ? projectId : null,
+        };
   void fetch("/api/me/focus-status", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -626,7 +629,7 @@ export function ActivityApp({
     setRemaining(left);
     setRunning(true);
     setPaused(false);
-    postFocusStatus(p.endsAt);
+    postFocusStatus(p.endsAt, p.selectedId);
     writeTimerStorage({
       v: 2,
       selectedId: p.selectedId,
@@ -731,7 +734,7 @@ export function ActivityApp({
         endsAt,
         pausedSince: null,
       });
-      postFocusStatus(endsAt);
+      postFocusStatus(endsAt, selectedIdRef.current);
       setRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
     } finally {
       setArming(false);
@@ -776,7 +779,7 @@ export function ActivityApp({
         endsAt,
         pausedSince: null,
       });
-      postFocusStatus(endsAt);
+      postFocusStatus(endsAt, selectedIdRef.current);
     } finally {
       setArming(false);
     }

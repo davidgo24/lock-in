@@ -16,12 +16,17 @@ model User {
   handle            String?   @unique
   /// When set and in the future, friends may show “in focus” (synced while a timer is running).
   activeFocusEndsAt DateTime?
+  /// Focus area for the active timer — friends may show the label (must be this user’s project).
+  activeFocusProjectId String?
+  activeFocusProject   Project? @relation("UserActiveFocusProject", fields: [activeFocusProjectId], references: [id], onDelete: SetNull)
   /// Optional profile picture (served from /api/avatar/[userId] for self + friends).
   avatarBytes       Bytes?
   avatarMime        String?
   createdAt         DateTime  @default(now())
   projects     Project[]
   settings     AppSettings?
+
+  @@index([activeFocusProjectId])
 
   sentFriendRequests     FriendRequest[] @relation("FriendRequestFrom")
   receivedFriendRequests FriendRequest[] @relation("FriendRequestTo")
@@ -80,6 +85,7 @@ model Project {
   archivedAt DateTime?
   createdAt DateTime          @default(now())
   sessions  ActivitySession[]
+  usersWithThisAsActiveFocus User[] @relation("UserActiveFocusProject")
 
   @@index([userId])
   @@index([isMisc])

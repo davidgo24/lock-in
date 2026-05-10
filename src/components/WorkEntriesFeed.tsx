@@ -5,7 +5,13 @@ import { useCallback, useEffect, useState } from "react";
 export type ActivitySocial = {
   clapCount: number;
   clappedByMe: boolean;
-  comments: { authorLabel: string; body: string; createdAt: string }[];
+  comments: {
+    authorLabel: string;
+    authorUserId: string;
+    authorHasAvatar: boolean;
+    body: string;
+    createdAt: string;
+  }[];
   myComment: string | null;
 };
 
@@ -30,9 +36,15 @@ function SessionAvatar(props: {
   initial: string;
   /** Bump after upload/remove so the browser refetches `/api/avatar/...`. */
   cacheBust?: number;
+  size?: "sm" | "md";
 }) {
-  const { userId, hasAvatar, initial, cacheBust = 0 } = props;
+  const { userId, hasAvatar, initial, cacheBust = 0, size = "md" } = props;
   const [imgFailed, setImgFailed] = useState(false);
+  const box =
+    size === "sm"
+      ? "h-8 w-8 text-xs"
+      : "h-11 w-11 text-sm";
+  const imgPx = size === "sm" ? 32 : 44;
 
   if (userId && hasAvatar && !imgFailed) {
     const qs = cacheBust > 0 ? `?v=${cacheBust}` : "";
@@ -41,9 +53,9 @@ function SessionAvatar(props: {
       <img
         src={`/api/avatar/${userId}${qs}`}
         alt=""
-        width={44}
-        height={44}
-        className="h-11 w-11 shrink-0 rounded-full border border-[var(--app-accent-muted)] object-cover"
+        width={imgPx}
+        height={imgPx}
+        className={`${box} shrink-0 rounded-full border border-[var(--app-accent-muted)] object-cover`}
         onError={() => setImgFailed(true)}
       />
     );
@@ -51,7 +63,7 @@ function SessionAvatar(props: {
 
   return (
     <div
-      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full border border-[var(--app-accent-muted)] bg-[var(--app-accent)]/10 text-sm font-semibold text-[var(--app-accent)]"
+      className={`flex ${box} shrink-0 items-center justify-center rounded-full border border-[var(--app-accent-muted)] bg-[var(--app-accent)]/10 font-semibold text-[var(--app-accent)]`}
       aria-hidden
     >
       {initial}
@@ -233,19 +245,34 @@ function FriendEntryRow({
           {social.comments.length > 0 ? (
             <ul className="mt-2 space-y-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 p-2">
               {social.comments.map((c, i) => (
-                <li key={`${e.id}-c-${i}`} className="text-xs leading-snug">
-                  <span className="font-medium text-[var(--foreground)]/90">
-                    {c.authorLabel}
-                  </span>
-                  <span className="text-[var(--app-muted)]">
-                    {" "}
-                    ·{" "}
-                    <span className="tabular-nums">
-                      {formatRelativeTime(c.createdAt)}
+                <li
+                  key={`${e.id}-c-${i}`}
+                  className="flex gap-2 text-xs leading-snug"
+                >
+                  <SessionAvatar
+                    userId={c.authorUserId}
+                    hasAvatar={c.authorHasAvatar}
+                    initial={
+                      c.authorLabel.trim().charAt(0).toUpperCase() || "?"
+                    }
+                    cacheBust={avatarCacheBust}
+                    size="sm"
+                  />
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <span className="font-medium text-[var(--foreground)]/90">
+                      {c.authorLabel}
                     </span>
-                    {" · "}
-                  </span>
-                  <span className="text-[var(--foreground)]/80">{c.body}</span>
+                    <span className="text-[var(--app-muted)]">
+                      {" "}
+                      ·{" "}
+                      <span className="tabular-nums">
+                        {formatRelativeTime(c.createdAt)}
+                      </span>
+                    </span>
+                    <p className="mt-0.5 text-[var(--foreground)]/80">
+                      {c.body}
+                    </p>
+                  </div>
                 </li>
               ))}
             </ul>
@@ -458,21 +485,33 @@ export function WorkEntriesFeed({
                             {social.comments.map((c, i) => (
                               <li
                                 key={`${e.id}-oc-${i}`}
-                                className="rounded-md bg-[var(--app-surface-card)]/80 px-2 py-1.5 text-xs leading-snug text-[var(--foreground)]/85"
+                                className="flex gap-2 rounded-md bg-[var(--app-surface-card)]/80 px-2 py-1.5 text-xs leading-snug text-[var(--foreground)]/85"
                               >
-                                <span className="font-medium">
-                                  {c.authorLabel}
-                                </span>
-                                <span className="text-[var(--app-muted)]">
-                                  {" "}
-                                  ·{" "}
-                                  <span className="tabular-nums">
-                                    {formatRelativeTime(c.createdAt)}
+                                <SessionAvatar
+                                  userId={c.authorUserId}
+                                  hasAvatar={c.authorHasAvatar}
+                                  initial={
+                                    c.authorLabel.trim().charAt(0).toUpperCase() ||
+                                    "?"
+                                  }
+                                  cacheBust={avatarCacheBust}
+                                  size="sm"
+                                />
+                                <div className="min-w-0 flex-1 pt-0.5">
+                                  <span className="font-medium">
+                                    {c.authorLabel}
                                   </span>
-                                </span>
-                                <span className="text-[var(--foreground)]/80">
-                                  : {c.body}
-                                </span>
+                                  <span className="text-[var(--app-muted)]">
+                                    {" "}
+                                    ·{" "}
+                                    <span className="tabular-nums">
+                                      {formatRelativeTime(c.createdAt)}
+                                    </span>
+                                  </span>
+                                  <p className="mt-0.5 text-[var(--foreground)]/80">
+                                    {c.body}
+                                  </p>
+                                </div>
                               </li>
                             ))}
                           </ul>

@@ -4,10 +4,18 @@ import { areFriends, publicLabel } from "@/lib/friends";
 
 const COMMENT_MAX = 500;
 
+export type ActivitySocialComment = {
+  authorLabel: string;
+  authorUserId: string;
+  authorHasAvatar: boolean;
+  body: string;
+  createdAt: string;
+};
+
 export type ActivitySocialPayload = {
   clapCount: number;
   clappedByMe: boolean;
-  comments: { authorLabel: string; body: string; createdAt: string }[];
+  comments: ActivitySocialComment[];
   myComment: string | null;
 };
 
@@ -167,13 +175,12 @@ type CommentWithUser = {
   };
 };
 
-function mapComment(c: CommentWithUser): {
-  authorLabel: string;
-  body: string;
-  createdAt: string;
-} {
+function mapComment(c: CommentWithUser): ActivitySocialComment {
   return {
     authorLabel: publicLabel(c.user),
+    authorUserId: c.user.id,
+    authorHasAvatar:
+      c.user.avatarBytes != null && c.user.avatarBytes.length > 0,
     body: c.body,
     createdAt: c.createdAt.toISOString(),
   };
@@ -221,10 +228,7 @@ export async function getSocialBySessionIds(
     myComments.map((c) => [c.sessionId, c.body]),
   );
 
-  const commentsBySession = new Map<
-    string,
-    { authorLabel: string; body: string; createdAt: string }[]
-  >();
+  const commentsBySession = new Map<string, ActivitySocialComment[]>();
   for (const sid of sessionIds) commentsBySession.set(sid, []);
   for (const row of allComments) {
     const list = commentsBySession.get(row.sessionId);

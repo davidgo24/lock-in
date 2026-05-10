@@ -11,6 +11,7 @@ const userPublicSelect = {
 const friendPublicSelect = {
   ...userPublicSelect,
   activeFocusEndsAt: true,
+  activeFocusProject: { select: { name: true, isMisc: true } },
 } as const satisfies Prisma.UserSelect;
 
 export type PublicUserMini = Prisma.UserGetPayload<{ select: typeof userPublicSelect }>;
@@ -48,6 +49,8 @@ export type FriendsStatePayload = {
     hasAvatar: boolean;
     /** ISO end time if friend is in an active focus block (in the future); otherwise null. */
     activeFocusEndsAt: string | null;
+    /** Their current focus area label while the timer is running; null if unknown. */
+    activeFocusProjectName: string | null;
   }[];
   incoming: {
     id: string;
@@ -93,12 +96,20 @@ export async function getFriendsState(userId: string): Promise<FriendsStatePaylo
       const ends = u.activeFocusEndsAt;
       const active =
         ends != null && ends.getTime() > now.getTime() ? ends.toISOString() : null;
+      const proj = u.activeFocusProject;
+      const activeFocusProjectName =
+        active && proj
+          ? proj.isMisc
+            ? "General"
+            : proj.name
+          : null;
       return {
         userId: u.id,
         handle: u.handle,
         label: publicLabel(u),
         hasAvatar: u.avatarBytes != null && u.avatarBytes.length > 0,
         activeFocusEndsAt: active,
+        activeFocusProjectName,
       };
     }),
     incoming: incomingRows.map((r) => ({

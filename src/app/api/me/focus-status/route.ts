@@ -11,7 +11,7 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  let body: { endsAt?: string | null };
+  let body: { endsAt?: string | null; projectId?: string | null };
   try {
     body = await req.json();
   } catch {
@@ -21,7 +21,7 @@ export async function POST(req: Request) {
   if (body.endsAt == null) {
     await prisma.user.update({
       where: { id: userId },
-      data: { activeFocusEndsAt: null },
+      data: { activeFocusEndsAt: null, activeFocusProjectId: null },
     });
     return NextResponse.json({ ok: true });
   }
@@ -35,9 +35,19 @@ export async function POST(req: Request) {
     return NextResponse.json({ error: "Timer too long" }, { status: 400 });
   }
 
+  let activeFocusProjectId: string | null = null;
+  const rawPid = body.projectId;
+  if (rawPid != null && String(rawPid).trim() !== "") {
+    const proj = await prisma.project.findFirst({
+      where: { id: String(rawPid), userId },
+      select: { id: true },
+    });
+    if (proj) activeFocusProjectId = proj.id;
+  }
+
   await prisma.user.update({
     where: { id: userId },
-    data: { activeFocusEndsAt: end },
+    data: { activeFocusEndsAt: end, activeFocusProjectId },
   });
   return NextResponse.json({ ok: true });
 }

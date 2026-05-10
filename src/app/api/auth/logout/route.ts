@@ -6,7 +6,10 @@ export async function POST() {
   const userId = await getSessionUserId();
   if (userId) {
     await prisma.user
-      .update({ where: { id: userId }, data: { activeFocusEndsAt: null } })
+      .update({
+        where: { id: userId },
+        data: { activeFocusEndsAt: null, activeFocusProjectId: null },
+      })
       .catch(() => {});
   }
   const res = NextResponse.json({ ok: true });
