@@ -104,14 +104,6 @@ export function FriendsInFocusStrip(props: {
           ))}
         </ul>
       )}
-      <p className="mt-3 text-center text-[11px] text-[var(--app-muted)]">
-        <Link
-          href="/friends"
-          className="font-medium text-[var(--app-accent)] underline underline-offset-2"
-        >
-          Manage friends
-        </Link>
-      </p>
     </section>
   );
 }

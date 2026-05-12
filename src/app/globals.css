@@ -104,7 +104,7 @@ body {
 }
 
 .dash-section-anchor {
-  scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 7.25rem);
+  scroll-margin-top: calc(env(safe-area-inset-top, 0px) + 9rem);
 }
 
 @media (prefers-reduced-motion: no-preference) {

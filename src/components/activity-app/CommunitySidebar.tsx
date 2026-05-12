@@ -137,14 +137,8 @@ export function CommunitySidebar({
             </p>
             {friendsState.friends.length === 0 ? (
               <p className="mt-4 text-sm text-[var(--app-muted)]">
-                Add people on the{" "}
-                <Link
-                  href="/friends"
-                  className="font-medium text-[var(--app-accent)] underline"
-                >
-                  Friends
-                </Link>{" "}
-                page to see when they&apos;re in focus.
+                When someone you&apos;re connected with is in focus, they&apos;ll
+                appear here.
               </p>
             ) : focusingFriends.length === 0 ? (
               <p className="mt-4 text-sm text-[var(--app-muted)]">
@@ -202,37 +196,6 @@ export function CommunitySidebar({
           </div>
 
           <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <div className="min-w-0">
-                <p className="text-sm font-semibold text-[var(--foreground)]">
-                  Your network
-                </p>
-                <p className="mt-0.5 text-xs leading-snug text-[var(--app-muted)]">
-                  {friendsState.friends.length === 0
-                    ? "Send requests and accept invites on the Friends page."
-                    : `${friendsState.friends.length} friend${friendsState.friends.length === 1 ? "" : "s"} connected`}
-                  {friendsState.incoming.length > 0 ? (
-                    <span className="font-medium text-rose-600 dark:text-rose-400">
-                      {" "}
-                      · {friendsState.incoming.length} incoming{" "}
-                      {friendsState.incoming.length === 1
-                        ? "request"
-                        : "requests"}
-                    </span>
-                  ) : null}
-                </p>
-              </div>
-              <Link
-                href="/friends"
-                onClick={() => hapticLight()}
-                className="inline-flex shrink-0 items-center justify-center rounded-lg bg-[var(--app-accent)] px-4 py-2.5 text-center text-xs font-medium text-white sm:self-stretch"
-              >
-                Friends page
-              </Link>
-            </div>
-          </div>
-
-          <div className="mt-4 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
             <WorkEntriesFeed
               entries={friendFeed}
               displayName=""
@@ -243,7 +206,7 @@ export function CommunitySidebar({
               avatarCacheBust={avatarCacheBust}
               emptyMessage={
                 friendsState.friends.length === 0
-                  ? "Go to the Friends page to connect with someone."
+                  ? "Friend activity will show up here once you are connected with people."
                   : "Nothing logged yet — check back after their next session."
               }
             />

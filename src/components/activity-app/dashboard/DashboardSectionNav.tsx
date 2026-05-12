@@ -21,7 +21,12 @@ function scrollToId(id: string) {
 export function DashboardSectionNav() {
   return (
     <nav
-      className="sticky top-[max(0.75rem,calc(env(safe-area-inset-top,0px)+0.5rem))] z-40 -mx-3 mb-1 mt-2 px-2 sm:-mx-5 sm:px-3 xl:hidden"
+      className="sticky top-0 z-40 -mx-3 mb-1 border-b border-[var(--app-border)]/35 bg-[var(--background)]/92 px-2 pb-2 backdrop-blur-md sm:-mx-5 sm:px-3 xl:hidden"
+      style={{
+        // Sticky `top` + env() alone often isn’t enough in Mobile Safari — pad the whole bar down
+        // with a minimum so pills never sit under the status bar / Dynamic Island.
+        paddingTop: "max(3.5rem, calc(env(safe-area-inset-top, 0px) + 0.75rem))",
+      }}
       aria-label="Dashboard sections"
     >
       <div className="rounded-2xl border-2 border-[var(--app-border)] bg-[var(--app-surface-card)]/95 p-2.5 shadow-[0_8px_30px_-4px_rgba(0,0,0,0.45),0_0_0_1px_rgba(124,108,240,0.12)] backdrop-blur-md ring-1 ring-[var(--app-accent)]/15">
