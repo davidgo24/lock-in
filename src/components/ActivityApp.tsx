@@ -21,7 +21,6 @@ import {
   notifyTimerPausedLong,
   requestTimerNotifyPermissionIfNeeded,
 } from "@/lib/timer-notify";
-import { normalizeHandleInput, validateHandle } from "@/lib/handle";
 import type { FriendsStatePayload } from "@/lib/friends";
 import type { StatsBundle } from "@/lib/stats";
 import {
@@ -138,18 +137,9 @@ export function ActivityApp({
   const notifPanelRef = useRef<HTMLDivElement | null>(null);
   const [friendsState, setFriendsState] =
     useState<FriendsStatePayload>(initialFriendsState);
-  const [handleDraft, setHandleDraft] = useState(
-    initialFriendsState.myHandle ?? "",
-  );
-  const [requestHandleDraft, setRequestHandleDraft] = useState("");
-  const [friendNotice, setFriendNotice] = useState<FriendNotice | null>(null);
-  const [handleSaving, setHandleSaving] = useState(false);
-  const [friendRequestBusy, setFriendRequestBusy] = useState(false);
   const [sidebarTab, setSidebarTab] = useState<"you" | "community">(() =>
     initialFriendsState.incoming.length > 0 ? "community" : "you",
   );
-  /** Community tab: full friends UI is heavy — keep a slim summary until the user expands. */
-  const [friendsPanelExpanded, setFriendsPanelExpanded] = useState(false);
   const [viewerHasAvatar, setViewerHasAvatar] = useState(initialViewerHasAvatar);
   const [avatarCacheBust, setAvatarCacheBust] = useState(0);
   const [dashNotice, setDashNotice] = useState<FriendNotice | null>(null);
@@ -159,12 +149,6 @@ export function ActivityApp({
   );
   const [pendingArchiveId, setPendingArchiveId] = useState<string | null>(null);
   const pendingArchiveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const [pendingUnfriendId, setPendingUnfriendId] = useState<string | null>(
-    null,
-  );
-  const pendingUnfriendTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
   const prevIncomingCountRef = useRef(initialFriendsState.incoming.length);
@@ -194,7 +178,6 @@ export function ActivityApp({
 
     if (fRes.ok) {
       setFriendsState(fJson);
-      setHandleDraft(fJson.myHandle ?? "");
     }
 
     if (ffRes.ok) {
@@ -253,7 +236,13 @@ export function ActivityApp({
     const profRes = await fetch("/api/profile");
     if (profRes.ok) {
       const pj = await profRes.json();
-      setViewerHasAvatar(!!(pj as { hasAvatar?: boolean }).hasAvatar);
+      const nextHas = !!(pj as { hasAvatar?: boolean }).hasAvatar;
+      setViewerHasAvatar((prev) => {
+        if (prev !== nextHas) {
+          setAvatarCacheBust((n) => n + 1);
+        }
+        return nextHas;
+      });
     }
   }, []);
 
@@ -378,9 +367,6 @@ export function ActivityApp({
       }
       if (pendingArchiveTimerRef.current) {
         clearTimeout(pendingArchiveTimerRef.current);
-      }
-      if (pendingUnfriendTimerRef.current) {
-        clearTimeout(pendingUnfriendTimerRef.current);
       }
       clearPauseNudge();
     };
@@ -956,205 +942,6 @@ export function ActivityApp({
 
   const selectedProject = projects.find((p) => p.id === selectedId);
 
-  function copyAppLink() {
-    const origin =
-      typeof window !== "undefined" ? window.location.origin : "";
-    const url = `${origin}/?tab=community`;
-    void navigator.clipboard.writeText(url).then(
-      () => {
-        setFriendNotice({
-          text: "Invite link copied — opens Community for new signups.",
-          kind: "success",
-        });
-      },
-      () => {
-        setFriendNotice({
-          text: `Could not copy. Send them: ${url}`,
-          kind: "info",
-        });
-      },
-    );
-  }
-
-  async function saveMyHandle() {
-    setFriendNotice(null);
-    const normalized = normalizeHandleInput(handleDraft);
-    const he = validateHandle(normalized);
-    if (he) {
-      setFriendNotice({ text: he, kind: "error" });
-      return;
-    }
-    setHandleSaving(true);
-    try {
-      const res = await fetch("/api/profile", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle: handleDraft }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setFriendNotice({
-          text:
-            (j as { error?: string }).error ?? "Could not save handle",
-          kind: "error",
-        });
-        return;
-      }
-      await loadAll();
-      setFriendNotice({
-        text: "Handle saved — friends can find you.",
-        kind: "success",
-      });
-    } finally {
-      setHandleSaving(false);
-    }
-  }
-
-  async function sendFriendRequestWithHandle(
-    handleInput: string,
-    opts?: { clearDraftOnSuccess?: boolean },
-  ) {
-    setFriendNotice(null);
-    const normalized = normalizeHandleInput(handleInput);
-    const he = validateHandle(normalized);
-    if (he) {
-      setFriendNotice({ text: he, kind: "error" });
-      return;
-    }
-    setFriendRequestBusy(true);
-    try {
-      const res = await fetch("/api/friends/request", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ handle: handleInput }),
-      });
-      const j = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setFriendNotice({
-          text:
-            (j as { error?: string }).error ??
-              (res.status === 404 ? "User does not exist." : "Request failed"),
-          kind: "error",
-        });
-        return;
-      }
-      setFriendsState(j as FriendsStatePayload);
-      if (opts?.clearDraftOnSuccess) setRequestHandleDraft("");
-      setFriendNotice({ text: "Request sent.", kind: "success" });
-      void loadAll();
-    } finally {
-      setFriendRequestBusy(false);
-    }
-  }
-
-  async function sendFriendRequest() {
-    await sendFriendRequestWithHandle(requestHandleDraft, {
-      clearDraftOnSuccess: true,
-    });
-  }
-
-  async function acceptRequest(requestId: string) {
-    setFriendNotice(null);
-    const res = await fetch("/api/friends/accept", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setFriendNotice({
-        text: (j as { error?: string }).error ?? "Could not accept",
-        kind: "error",
-      });
-      return;
-    }
-    setFriendsState(j as FriendsStatePayload);
-    setFriendNotice({
-      text: "You're connected — their activity shows below.",
-      kind: "success",
-    });
-    void loadAll();
-  }
-
-  async function rejectRequest(requestId: string) {
-    setFriendNotice(null);
-    const res = await fetch("/api/friends/reject", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setFriendNotice({
-        text: (j as { error?: string }).error ?? "Could not decline",
-        kind: "error",
-      });
-      return;
-    }
-    setFriendsState(j as FriendsStatePayload);
-    setFriendNotice({ text: "Request declined.", kind: "info" });
-    void loadAll();
-  }
-
-  async function removeFriend(otherUserId: string) {
-    if (pendingUnfriendId !== otherUserId) {
-      if (pendingUnfriendTimerRef.current) {
-        clearTimeout(pendingUnfriendTimerRef.current);
-      }
-      setPendingUnfriendId(otherUserId);
-      setDashNotice({
-        text: "Tap Remove again to unfriend — you will stop seeing each other's activity.",
-        kind: "info",
-      });
-      pendingUnfriendTimerRef.current = setTimeout(() => {
-        setPendingUnfriendId(null);
-        pendingUnfriendTimerRef.current = null;
-      }, 5000);
-      return;
-    }
-    if (pendingUnfriendTimerRef.current) {
-      clearTimeout(pendingUnfriendTimerRef.current);
-      pendingUnfriendTimerRef.current = null;
-    }
-    setPendingUnfriendId(null);
-    setFriendNotice(null);
-    const res = await fetch(`/api/friends/${otherUserId}`, {
-      method: "DELETE",
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setFriendNotice({
-        text: (j as { error?: string }).error ?? "Could not remove",
-        kind: "error",
-      });
-      return;
-    }
-    setFriendsState(j as FriendsStatePayload);
-    setDashNotice(null);
-    setFriendNotice({ text: "Removed from friends.", kind: "info" });
-    void loadAll();
-  }
-
-  async function cancelOutgoingRequest(requestId: string) {
-    setFriendNotice(null);
-    const res = await fetch("/api/friends/cancel", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ requestId }),
-    });
-    const j = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      setFriendNotice({
-        text: (j as { error?: string }).error ?? "Could not cancel request",
-        kind: "error",
-      });
-      return;
-    }
-    setFriendsState(j as FriendsStatePayload);
-    setFriendNotice({ text: "Request cancelled.", kind: "info" });
-    void loadAll();
-  }
-
   if (showSave) {
     return (
       <SaveSessionScreens
@@ -1187,6 +974,7 @@ export function ActivityApp({
         notifPanelRef={notifPanelRef}
         onToggleNotifPanel={toggleNotifPanel}
         onLogout={logout}
+        pendingFriendRequests={friendsState.incoming.length}
       />
 
       {dashNotice ? (
@@ -1291,42 +1079,11 @@ export function ActivityApp({
           viewerUserId={viewerUserId}
           viewerHasAvatar={viewerHasAvatar}
           avatarCacheBust={avatarCacheBust}
-          onViewerAvatarChange={(has) => {
-            setViewerHasAvatar(has);
-            setAvatarCacheBust((n) => n + 1);
-            if (has) {
-              setFriendNotice({
-                text: "Profile photo updated.",
-                kind: "success",
-              });
-            }
-          }}
-          onAvatarNotice={(msg, kind) => setFriendNotice({ text: msg, kind })}
           workEntries={workEntries}
           friendFeed={friendFeed}
           friendsState={friendsState}
           sidebarTab={sidebarTab}
           onSidebarTab={setSidebarTab}
-          friendsPanelExpanded={friendsPanelExpanded}
-          onFriendsPanelExpanded={setFriendsPanelExpanded}
-          friendNotice={friendNotice}
-          handleDraft={handleDraft}
-          onHandleDraftChange={setHandleDraft}
-          requestHandleDraft={requestHandleDraft}
-          onRequestHandleDraftChange={setRequestHandleDraft}
-          handleSaving={handleSaving}
-          pendingUnfriendId={pendingUnfriendId}
-          onSaveMyHandle={() => void saveMyHandle()}
-          onSendFriendRequest={() => void sendFriendRequest()}
-          friendRequestBusy={friendRequestBusy}
-          onSendFriendRequestToHandle={(h) =>
-            void sendFriendRequestWithHandle(h)
-          }
-          onAcceptRequest={(id) => void acceptRequest(id)}
-          onRejectRequest={(id) => void rejectRequest(id)}
-          onRemoveFriend={(userId) => void removeFriend(userId)}
-          onCancelOutgoing={(id) => void cancelOutgoingRequest(id)}
-          onCopyAppLink={copyAppLink}
           refreshEntryFeeds={refreshEntryFeeds}
         />
       </div>

@@ -2,7 +2,7 @@
 
 import type { RefObject } from "react";
 import Link from "next/link";
-import { Bell, Flame, LogOut, Trophy, User } from "lucide-react";
+import { Bell, Flame, LogOut, Trophy, User, Users } from "lucide-react";
 import { hapticLight } from "@/lib/haptics";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { StatsBundle } from "@/lib/stats";
@@ -16,6 +16,8 @@ type Props = {
   notifPanelRef: RefObject<HTMLDivElement | null>;
   onToggleNotifPanel: () => void | Promise<void>;
   onLogout: () => void | Promise<void>;
+  /** Pending incoming friend requests — shows badge on Friends link. */
+  pendingFriendRequests?: number;
 };
 
 export function DashboardHeader({
@@ -26,6 +28,7 @@ export function DashboardHeader({
   notifPanelRef,
   onToggleNotifPanel,
   onLogout,
+  pendingFriendRequests = 0,
 }: Props) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--app-border)] pb-4">
@@ -79,23 +82,23 @@ export function DashboardHeader({
           </button>
           {notifOpen ? (
             <div
-              className="absolute right-0 z-50 mt-2 w-[min(calc(100vw-2rem),20rem)] rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-2 shadow-xl shadow-black/20"
+              className="fixed inset-x-3 top-[max(3.5rem,env(safe-area-inset-top))] z-[100] max-h-[min(70dvh,28rem)] overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] shadow-xl shadow-black/25 sm:absolute sm:inset-x-auto sm:right-0 sm:left-auto sm:top-full sm:z-50 sm:mt-2 sm:w-[min(20rem,calc(100vw-2rem))] sm:max-h-80"
               role="dialog"
               aria-label="Notifications"
             >
-              <p className="border-b border-[var(--app-border)] px-2 pb-2 text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+              <p className="border-b border-[var(--app-border)] px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
                 Reactions on your activity
               </p>
               {notif.items.length === 0 ? (
-                <p className="px-2 py-6 text-center text-sm text-[var(--app-muted)]">
+                <p className="px-3 py-8 text-center text-sm text-[var(--app-muted)]">
                   Nothing yet — when friends clap or comment, it shows up here.
                 </p>
               ) : (
-                <ul className="max-h-80 overflow-y-auto py-1">
+                <ul className="max-h-[min(60dvh,20rem)] overflow-y-auto overscroll-contain py-1 sm:max-h-72">
                   {notif.items.map((n) => (
                     <li
                       key={n.id}
-                      className="rounded-lg px-2 py-2 text-sm leading-snug text-[var(--foreground)] hover:bg-[var(--background)]/60"
+                      className="px-3 py-2.5 text-sm leading-snug text-[var(--foreground)] hover:bg-[var(--background)]/60"
                     >
                       <span className="font-medium">{n.actorLabel}</span>{" "}
                       {n.type === "CLAP"
@@ -113,6 +116,23 @@ export function DashboardHeader({
             </div>
           ) : null}
         </div>
+        <Link
+          href="/friends"
+          onClick={() => hapticLight()}
+          className={`relative inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] text-[var(--foreground)] hover:bg-[var(--background)]/50 ${
+            pendingFriendRequests > 0
+              ? "ring-2 ring-[var(--app-accent)]/50 ring-offset-2 ring-offset-[var(--background)]"
+              : ""
+          }`}
+          aria-label="Friends and requests"
+        >
+          <Users className="h-4 w-4 shrink-0" />
+          {pendingFriendRequests > 0 ? (
+            <span className="absolute -right-1.5 -top-1.5 flex min-h-[1.125rem] min-w-[1.125rem] items-center justify-center rounded-full bg-[var(--app-accent)] px-1.5 text-[11px] font-extrabold leading-none text-white shadow-md tabular-nums">
+              {pendingFriendRequests > 9 ? "9+" : pendingFriendRequests}
+            </span>
+          ) : null}
+        </Link>
         <Link
           href="/profile"
           onClick={() => hapticLight()}

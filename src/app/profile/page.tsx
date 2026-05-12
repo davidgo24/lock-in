@@ -29,6 +29,8 @@ export default async function ProfilePage() {
     handle: user.handle,
     avatarBytes: user.avatarBytes,
   });
+  const displayLine =
+    user.displayName?.trim() || (user.handle ? `@${user.handle}` : "You");
 
   return (
     <div className="relative mx-auto min-h-dvh max-w-lg px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
@@ -41,31 +43,48 @@ export default async function ProfilePage() {
       >
         ← Dashboard
       </Link>
-      <h1 className="mt-6 font-display text-2xl text-[var(--foreground)]">
-        Your profile
-      </h1>
-      <p className="mt-1 text-sm text-[var(--app-muted)]">
-        How you show up to friends — handle, photo, and name summary.
-      </p>
 
-      <div className="mt-6 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-5 shadow-lg shadow-black/10">
-        <p className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">
-          Overview
-        </p>
-        <p className="mt-2 text-sm text-[var(--foreground)]">
-          <span className="font-medium">{label}</span>
-        </p>
-        <p className="mt-1 text-xs text-[var(--app-muted)]">
-          {user.displayName?.trim()
-            ? "Display name is set at sign-up."
-            : "Add a display name next time you create an account — yours is empty."}
-        </p>
-        <p className="mt-3 text-xs text-[var(--app-muted)]">
-          Email <span className="text-[var(--foreground)]/80">{user.email}</span>
-        </p>
+      <div className="mt-6 flex flex-col items-center gap-5 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-6 shadow-lg shadow-black/10 sm:flex-row sm:items-center sm:gap-6">
+        {hasAvatar ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={`/api/avatar/${userId}`}
+            alt=""
+            width={112}
+            height={112}
+            className="h-28 w-28 shrink-0 rounded-full border-2 border-[var(--app-border)] object-cover"
+          />
+        ) : (
+          <div className="flex h-28 w-28 shrink-0 items-center justify-center rounded-full border-2 border-[var(--app-border)] bg-[var(--app-accent-muted)] text-3xl font-semibold text-[var(--app-accent)]">
+            {label.trim().charAt(0).toUpperCase() || "?"}
+          </div>
+        )}
+        <div className="min-w-0 flex-1 text-center sm:text-left">
+          <p className="font-display text-2xl tracking-tight text-[var(--foreground)]">
+            {displayLine}
+          </p>
+          {user.handle ? (
+            <p className="mt-1 text-base text-[var(--app-muted)]">
+              @{user.handle}
+            </p>
+          ) : (
+            <p className="mt-1 text-sm text-[var(--app-muted)]">
+              No handle yet — add one below so friends can find you.
+            </p>
+          )}
+          <p className="mt-3 text-xs text-[var(--app-muted)]">
+            {user.email}
+          </p>
+          <Link
+            href="/friends"
+            className="mt-4 inline-flex text-sm font-medium text-[var(--app-accent)] underline underline-offset-2"
+          >
+            Manage friends
+          </Link>
+        </div>
       </div>
 
-      <div className="mt-6">
+      <div className="mt-8">
         <ProfileIdentityClient
           viewerUserId={userId}
           initialHandle={user.handle ?? ""}

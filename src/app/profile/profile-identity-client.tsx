@@ -64,10 +64,11 @@ export function ProfileIdentityClient({
   return (
     <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-5 shadow-lg shadow-black/10">
       <p className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">
-        Identity & photo
+        Handle &amp; profile photo
       </p>
       <p className="mt-1 text-xs text-[var(--app-muted)]">
-        Preview: <span className="font-medium text-[var(--foreground)]">{labelPreview}</span>
+        How friends see you next to your activity. Preview:{" "}
+        <span className="font-medium text-[var(--foreground)]">{labelPreview}</span>
       </p>
 
       {notice ? (
