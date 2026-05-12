@@ -1,11 +1,12 @@
 "use client";
 
-import { Clock, Pause, Play, RotateCcw } from "lucide-react";
+import { Clock, Coffee, Pause, Play, RotateCcw } from "lucide-react";
 import {
   CUSTOM_PRESET_IDX,
   MAX_TIMER_SEC,
   MIN_TIMER_SEC,
   PRESETS,
+  type SessionPhase,
 } from "@/lib/activity-timer-local";
 import { formatClock } from "@/lib/activity-dashboard-format";
 import type { DashboardProject } from "@/lib/activity-dashboard-format";
@@ -21,6 +22,10 @@ type Props = {
   durationSec: number;
   running: boolean;
   paused: boolean;
+  sessionPhase: SessionPhase;
+  overtimeSec: number;
+  breakRemaining: number;
+  breakTotalSec: number;
   presetIdx: number;
   onApplyPreset: (idx: number) => void;
   customHours: number;
@@ -30,6 +35,8 @@ type Props = {
   onPauseOrResume: () => void;
   onStopAndLog: () => void;
   onDiscardTap: () => void;
+  onEndBreakEarly: () => void;
+  onOpenBreakOffer: () => void;
   pendingDiscard: boolean;
 };
 
@@ -43,6 +50,10 @@ export function FocusTimerPanel({
   durationSec,
   running,
   paused,
+  sessionPhase,
+  overtimeSec,
+  breakRemaining,
+  breakTotalSec,
   presetIdx,
   onApplyPreset,
   customHours,
@@ -52,15 +63,54 @@ export function FocusTimerPanel({
   onPauseOrResume,
   onStopAndLog,
   onDiscardTap,
+  onEndBreakEarly,
+  onOpenBreakOffer,
   pendingDiscard,
 }: Props) {
-  const progress = durationSec > 0 ? 1 - remaining / durationSec : 0;
+  const progress =
+    sessionPhase === "focus" && durationSec > 0
+      ? 1 - remaining / durationSec
+      : sessionPhase === "overtime"
+        ? 1
+        : sessionPhase === "break" && breakTotalSec > 0
+          ? 1 - breakRemaining / breakTotalSec
+          : 0;
+
+  const clockMain =
+    sessionPhase === "break"
+      ? formatClock(breakRemaining)
+      : sessionPhase === "overtime"
+        ? `+${formatClock(overtimeSec)}`
+        : formatClock(remaining);
+
+  const showArmingEllipsis = arming && sessionPhase === "focus";
+
+  const phaseLabel =
+    sessionPhase === "break"
+      ? paused
+        ? "Break paused"
+        : "On break"
+      : sessionPhase === "overtime"
+        ? paused
+          ? "Overtime paused"
+          : "Overtime"
+        : paused
+          ? "Paused"
+          : "In progress";
+
+  const ringClass =
+    sessionPhase === "break"
+      ? "stroke-amber-500"
+      : sessionPhase === "overtime"
+        ? "stroke-emerald-500"
+        : "stroke-[var(--app-accent)]";
+
   const circ = 2 * Math.PI * 44;
 
   return (
     <div
       id="dash-section-timer"
-      className="dash-section-anchor rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-5 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-7"
+      className="dash-section-anchor rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-5 shadow-lg shadow-black/10 sm:p-7"
     >
       <p className="font-display text-lg text-[var(--foreground)] sm:text-xl">
         What are you focusing on?
@@ -90,7 +140,7 @@ export function FocusTimerPanel({
               cy="50"
               r="44"
               fill="none"
-              className="stroke-[var(--app-accent)] motion-safe:transition-[stroke-dashoffset] motion-safe:duration-500"
+              className={`${ringClass} motion-safe:transition-[stroke-dashoffset] motion-safe:duration-500`}
               strokeWidth="10"
               strokeLinecap="round"
               strokeDasharray={`${circ} ${circ}`}
@@ -98,21 +148,31 @@ export function FocusTimerPanel({
             />
           </svg>
           <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-            <div className="text-3xl font-semibold tabular-nums text-[var(--foreground)]">
-              {arming ? "…" : formatClock(remaining)}
+            <div
+              className={`text-3xl font-semibold tabular-nums text-[var(--foreground)] ${sessionPhase === "overtime" ? "text-emerald-500 dark:text-emerald-400" : ""}`}
+            >
+              {showArmingEllipsis ? "…" : clockMain}
             </div>
             {running ? (
               <span
                 className={`mt-0.5 text-[10px] font-medium uppercase tracking-wider sm:text-xs ${
                   paused
                     ? "text-amber-600 dark:text-amber-400"
-                    : "text-[var(--app-accent)]"
+                    : sessionPhase === "break"
+                      ? "text-amber-600 dark:text-amber-400"
+                      : sessionPhase === "overtime"
+                        ? "text-emerald-600 dark:text-emerald-400"
+                        : "text-[var(--app-accent)]"
                 }`}
               >
-                {paused ? "Paused" : "In progress"}
+                {phaseLabel}
               </span>
             ) : null}
-            <Clock className="mt-1 h-4 w-4 text-[var(--app-muted)]" />
+            {sessionPhase === "break" ? (
+              <Coffee className="mt-1 h-4 w-4 text-[var(--app-muted)]" />
+            ) : (
+              <Clock className="mt-1 h-4 w-4 text-[var(--app-muted)]" />
+            )}
           </div>
         </div>
       </div>
@@ -229,6 +289,33 @@ export function FocusTimerPanel({
         </button>
       ) : (
         <div className="mt-5 flex flex-col gap-2">
+          {sessionPhase === "overtime" ? (
+            <button
+              type="button"
+              disabled={arming}
+              onClick={() => {
+                hapticLight();
+                onOpenBreakOffer();
+              }}
+              className="app-pressable flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-amber-500/45 bg-amber-500/10 py-3.5 text-sm font-medium text-amber-800 dark:text-amber-200 active:scale-[0.99] disabled:opacity-50"
+            >
+              <Coffee className="h-4 w-4 shrink-0" />
+              Take a break
+            </button>
+          ) : null}
+          {sessionPhase === "break" ? (
+            <button
+              type="button"
+              disabled={arming}
+              onClick={() => {
+                hapticMedium();
+                onEndBreakEarly();
+              }}
+              className="app-pressable flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-emerald-500/45 bg-emerald-500/10 py-3.5 text-sm font-medium text-emerald-800 dark:text-emerald-200 active:scale-[0.99] disabled:opacity-50"
+            >
+              End break
+            </button>
+          ) : null}
           <button
             type="button"
             disabled={arming}
@@ -282,9 +369,13 @@ export function FocusTimerPanel({
       )}
 
       <p className="mt-3 text-center text-[10px] leading-snug text-[var(--app-muted)] sm:text-[11px]">
-        Pause anytime; after 5 minutes paused we&apos;ll nudge you (in the app
-        and via notification if you allowed it). On your phone: turn the volume
-        up — when time&apos;s up you&apos;ll hear a chime and a short vibration.
+        When your block ends you&apos;ll get confetti and an overtime clock — tap{" "}
+        <span className="font-medium text-[var(--foreground)]/90">
+          Stop &amp; log
+        </span>{" "}
+        to save (planned time + overtime; breaks don&apos;t count). Pause anytime;
+        after 5 minutes paused we nudge you. Turn volume up for the chime when
+        the block completes.
       </p>
     </div>
   );

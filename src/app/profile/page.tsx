@@ -86,7 +86,9 @@ export default async function ProfilePage() {
 
       <div className="mt-8">
         <ProfileIdentityClient
+          key={`${user.displayName ?? ""}\0${user.handle ?? ""}`}
           viewerUserId={userId}
+          initialDisplayName={user.displayName ?? ""}
           initialHandle={user.handle ?? ""}
           initialHasAvatar={hasAvatar}
           publicLabel={label}

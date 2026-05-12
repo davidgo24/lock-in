@@ -11,6 +11,7 @@ import { AVATAR_MAX_MIB } from "@/lib/avatar";
 
 type Props = {
   viewerUserId: string;
+  initialDisplayName: string;
   initialHandle: string;
   initialHasAvatar: boolean;
   publicLabel: string;
@@ -18,18 +19,48 @@ type Props = {
 
 export function ProfileIdentityClient({
   viewerUserId,
+  initialDisplayName,
   initialHandle,
   initialHasAvatar,
   publicLabel: labelPreview,
 }: Props) {
   const router = useRouter();
+  const [displayNameDraft, setDisplayNameDraft] = useState(initialDisplayName);
   const [handleDraft, setHandleDraft] = useState(initialHandle);
   const [hasAvatar, setHasAvatar] = useState(initialHasAvatar);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [displayNameSaving, setDisplayNameSaving] = useState(false);
   const [handleSaving, setHandleSaving] = useState(false);
   const [notice, setNotice] = useState<FriendNotice | null>(null);
   const [imgFailed, setImgFailed] = useState(false);
   const [cacheBust, setCacheBust] = useState(0);
+
+  async function saveDisplayName() {
+    setNotice(null);
+    setDisplayNameSaving(true);
+    try {
+      const res = await fetch("/api/profile", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          displayName: displayNameDraft.trim() || null,
+        }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotice({
+          text:
+            (j as { error?: string }).error ?? "Could not save display name",
+          kind: "error",
+        });
+        return;
+      }
+      setNotice({ text: "Name saved.", kind: "success" });
+      router.refresh();
+    } finally {
+      setDisplayNameSaving(false);
+    }
+  }
 
   async function saveHandle() {
     setNotice(null);
@@ -64,7 +95,7 @@ export function ProfileIdentityClient({
   return (
     <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-5 shadow-lg shadow-black/10">
       <p className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">
-        Handle &amp; profile photo
+        Name, handle &amp; profile photo
       </p>
       <p className="mt-1 text-xs text-[var(--app-muted)]">
         How friends see you next to your activity. Preview:{" "}
@@ -81,6 +112,35 @@ export function ProfileIdentityClient({
       ) : null}
 
       <div className="mt-4 space-y-2">
+        <label className="text-xs font-medium text-[var(--app-muted)]">
+          Display name
+        </label>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <input
+            type="text"
+            className="min-h-10 w-full flex-1 rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+            placeholder="e.g. Alex Chen"
+            value={displayNameDraft}
+            onChange={(e) => setDisplayNameDraft(e.target.value)}
+            maxLength={80}
+            autoComplete="name"
+          />
+          <button
+            type="button"
+            disabled={displayNameSaving}
+            className="min-h-10 shrink-0 rounded-lg bg-[var(--app-accent)] px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            onClick={() => void saveDisplayName()}
+          >
+            {displayNameSaving ? "Saving…" : "Save"}
+          </button>
+        </div>
+        <p className="text-xs text-[var(--app-muted)]">
+          Up to 80 characters. Leave blank and save to clear — we&apos;ll fall
+          back to your @handle or email on the dashboard.
+        </p>
+      </div>
+
+      <div className="mt-6 space-y-2 border-t border-[var(--app-border)] pt-5">
         <label className="text-xs font-medium text-[var(--app-muted)]">
           Your handle
         </label>

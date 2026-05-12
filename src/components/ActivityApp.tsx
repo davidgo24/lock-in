@@ -50,12 +50,15 @@ import { hapticSuccess } from "@/lib/haptics";
 import {
   PRESETS,
   TIMER_STORAGE_KEY,
+  type SessionPhase,
   clampDurationSec,
   clearTimerStorage,
   parsePersisted,
   tryMigrateLegacyV1Key,
   writeTimerStorage,
 } from "@/lib/activity-timer-local";
+import { fireFocusCompleteConfetti } from "@/lib/timer-confetti";
+import { TimerBreakOffer } from "@/components/activity-app/TimerBreakOffer";
 
 const PAUSE_NUDGE_MS = 5 * 60 * 1000;
 
@@ -106,6 +109,19 @@ export function ActivityApp({
   const [goalDraft, setGoalDraft] = useState("7");
   const [arming, setArming] = useState(false);
   const [paused, setPaused] = useState(false);
+  const [sessionPhase, setSessionPhase] = useState<SessionPhase>("focus");
+  const [overtimeSec, setOvertimeSec] = useState(0);
+  const [breakOfferOpen, setBreakOfferOpen] = useState(false);
+  const [breakDraftMinutes, setBreakDraftMinutes] = useState(5);
+  const [breakRemaining, setBreakRemaining] = useState(0);
+  const [breakTotalSec, setBreakTotalSec] = useState(0);
+
+  const sessionPhaseRef = useRef<SessionPhase>("focus");
+  const overtimeSecRef = useRef(0);
+  const breakEndsAtRef = useRef<number | null>(null);
+  const breakRemainingSecRef = useRef<number | null>(null);
+  const celebrationFiredRef = useRef(false);
+  const pausedRef = useRef(false);
 
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const durationSecRef = useRef(durationSec);
@@ -156,6 +172,16 @@ export function ActivityApp({
   useEffect(() => {
     presetIdxRef.current = presetIdx;
   }, [presetIdx]);
+
+  useEffect(() => {
+    pausedRef.current = paused;
+  }, [paused]);
+  useEffect(() => {
+    sessionPhaseRef.current = sessionPhase;
+  }, [sessionPhase]);
+  useEffect(() => {
+    overtimeSecRef.current = overtimeSec;
+  }, [overtimeSec]);
 
   const loadAll = useCallback(async () => {
     const [pRes, sRes, eRes, fRes, ffRes, nRes] = await Promise.all([
@@ -393,35 +419,87 @@ export function ActivityApp({
   /** Keep server focus + localStorage aligned if the user switches focus area mid-session. */
   useEffect(() => {
     if (!running || arming) return;
-    if (!paused) {
+    const phase = sessionPhaseRef.current;
+    if (phase === "focus" && !paused) {
       const end = timerEndsAtRef.current;
       if (end == null) return;
       postFocusStatus(end, selectedId);
       writeTimerStorage({
-        v: 2,
+        v: 3,
         selectedId,
         durationSec: durationSecRef.current,
         presetIdx: presetIdxRef.current,
         paused: false,
+        sessionPhase: "focus",
         remaining: Math.max(0, Math.ceil((end - Date.now()) / 1000)),
         endsAt: end,
         pausedSince: null,
+        overtimeSec: 0,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
       });
       return;
     }
-    const since = pausedSinceRef.current;
-    if (since == null) return;
-    writeTimerStorage({
-      v: 2,
-      selectedId,
-      durationSec: durationSecRef.current,
-      presetIdx: presetIdxRef.current,
-      paused: true,
-      remaining: remainingRef.current,
-      endsAt: null,
-      pausedSince: since,
-    });
-  }, [selectedId, running, paused, arming]);
+    if (phase === "focus" && paused) {
+      const since = pausedSinceRef.current;
+      if (since == null) return;
+      writeTimerStorage({
+        v: 3,
+        selectedId,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: true,
+        sessionPhase: "focus",
+        remaining: remainingRef.current,
+        endsAt: null,
+        pausedSince: since,
+        overtimeSec: 0,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
+      });
+      return;
+    }
+    if (phase === "overtime") {
+      writeTimerStorage({
+        v: 3,
+        selectedId,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused,
+        sessionPhase: "overtime",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: paused ? pausedSinceRef.current : null,
+        overtimeSec: overtimeSecRef.current,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
+      });
+      return;
+    }
+    if (phase === "break") {
+      writeTimerStorage({
+        v: 3,
+        selectedId,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused,
+        sessionPhase: "break",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: paused ? pausedSinceRef.current : null,
+        overtimeSec: overtimeSecRef.current,
+        breakEndsAt: paused ? null : breakEndsAtRef.current,
+        breakRemainingSec:
+          paused && breakRemainingSecRef.current != null
+            ? breakRemainingSecRef.current
+            : null,
+        breakTotalSec,
+      });
+    }
+  }, [selectedId, running, paused, arming, sessionPhase, overtimeSec, breakTotalSec]);
 
   function clearTick() {
     if (timerRef.current) {
@@ -451,6 +529,7 @@ export function ActivityApp({
   }
 
   const syncFromEndTime = useCallback((playSoundOnComplete: boolean) => {
+    if (sessionPhaseRef.current !== "focus") return;
     const end = timerEndsAtRef.current;
     if (end == null) return;
     const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
@@ -458,29 +537,42 @@ export function ActivityApp({
       setRemaining(left);
       return;
     }
-    timerEndsAtRef.current = null;
     if (timerRef.current) {
       clearInterval(timerRef.current);
       timerRef.current = null;
     }
-    clearTimerStorage();
-    setRunning(false);
-    setPaused(false);
-    pausedSinceRef.current = null;
-    clearPauseNudge();
-    const pid = selectedIdRef.current;
-    const dur = durationSecRef.current;
-    completedMeta.current = { projectId: pid, durationSec: dur };
-    setSaveProjectId(pid);
-    setSessionSaveHint({
-      durationSec: dur,
-      early: false,
-    });
-    setShowSave(true);
+    timerEndsAtRef.current = null;
+    sessionPhaseRef.current = "overtime";
+    setSessionPhase("overtime");
+    setOvertimeSec(0);
+    overtimeSecRef.current = 0;
+    setBreakTotalSec(0);
+    remainingRef.current = 0;
     setRemaining(0);
+    clearPauseNudge();
     postFocusStatus(null);
-    if (playSoundOnComplete) void playTimerCompleteRing();
-    if (playSoundOnComplete) notifyTimerComplete();
+    if (playSoundOnComplete && !celebrationFiredRef.current) {
+      celebrationFiredRef.current = true;
+      void playTimerCompleteRing();
+      notifyTimerComplete();
+      fireFocusCompleteConfetti();
+    }
+    writeTimerStorage({
+      v: 3,
+      selectedId: selectedIdRef.current,
+      durationSec: durationSecRef.current,
+      presetIdx: presetIdxRef.current,
+      paused: false,
+      sessionPhase: "overtime",
+      remaining: 0,
+      endsAt: null,
+      pausedSince: null,
+      overtimeSec: 0,
+      breakEndsAt: null,
+      breakRemainingSec: null,
+      breakTotalSec: 0,
+    });
+    setBreakOfferOpen(true);
   }, []);
 
   const timerHydratedRef = useRef(false);
@@ -505,25 +597,164 @@ export function ActivityApp({
     setPresetIdx(p.presetIdx);
     setSelectedId(p.selectedId);
 
+    if (p.sessionPhase === "overtime") {
+      celebrationFiredRef.current = true;
+      sessionPhaseRef.current = "overtime";
+      setSessionPhase("overtime");
+      overtimeSecRef.current = p.overtimeSec;
+      setOvertimeSec(p.overtimeSec);
+      timerEndsAtRef.current = null;
+      breakEndsAtRef.current = null;
+      breakRemainingSecRef.current = null;
+      setBreakRemaining(0);
+      setBreakTotalSec(0);
+      setRemaining(0);
+      setRunning(true);
+      postFocusStatus(null);
+      setBreakOfferOpen(false);
+      if (p.paused) {
+        setPaused(true);
+        const since = p.pausedSince ?? Date.now();
+        pausedSinceRef.current = since;
+        schedulePauseNudge(since);
+        writeTimerStorage({
+          ...p,
+          v: 3,
+          sessionPhase: "overtime",
+          remaining: 0,
+          endsAt: null,
+          breakEndsAt: null,
+          breakRemainingSec: null,
+          breakTotalSec: 0,
+        });
+        return;
+      }
+      setPaused(false);
+      pausedSinceRef.current = null;
+      writeTimerStorage({
+        ...p,
+        v: 3,
+        sessionPhase: "overtime",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: null,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
+      });
+      return;
+    }
+
+    if (p.sessionPhase === "break") {
+      celebrationFiredRef.current = true;
+      sessionPhaseRef.current = "break";
+      setSessionPhase("break");
+      overtimeSecRef.current = p.overtimeSec;
+      setOvertimeSec(p.overtimeSec);
+      timerEndsAtRef.current = null;
+      setRemaining(0);
+      setRunning(true);
+      postFocusStatus(null);
+      setBreakOfferOpen(false);
+
+      if (p.paused && p.breakRemainingSec != null) {
+        breakEndsAtRef.current = null;
+        breakRemainingSecRef.current = p.breakRemainingSec;
+        setBreakRemaining(p.breakRemainingSec);
+        const bt =
+          p.breakTotalSec > 0
+            ? p.breakTotalSec
+            : Math.max(p.breakRemainingSec ?? 1, 1);
+        setBreakTotalSec(bt);
+        setPaused(true);
+        const since = p.pausedSince ?? Date.now();
+        pausedSinceRef.current = since;
+        schedulePauseNudge(since);
+        writeTimerStorage({
+          ...p,
+          v: 3,
+          paused: true,
+          breakEndsAt: null,
+          breakRemainingSec: p.breakRemainingSec,
+          breakTotalSec: bt,
+        });
+        return;
+      }
+
+      if (p.breakEndsAt == null) {
+        clearTimerStorage();
+        return;
+      }
+
+      breakEndsAtRef.current = p.breakEndsAt;
+      breakRemainingSecRef.current = null;
+      const brLeft = Math.max(
+        0,
+        Math.ceil((p.breakEndsAt - Date.now()) / 1000),
+      );
+      setBreakRemaining(brLeft);
+      const bt =
+        p.breakTotalSec > 0 ? p.breakTotalSec : Math.max(brLeft, 1);
+      setBreakTotalSec(bt);
+      if (brLeft <= 0) {
+        sessionPhaseRef.current = "overtime";
+        setSessionPhase("overtime");
+        breakEndsAtRef.current = null;
+        setPaused(false);
+        pausedSinceRef.current = null;
+        setBreakTotalSec(0);
+        writeTimerStorage({
+          ...p,
+          v: 3,
+          sessionPhase: "overtime",
+          paused: false,
+          remaining: 0,
+          endsAt: null,
+          pausedSince: null,
+          breakEndsAt: null,
+          breakRemainingSec: null,
+          breakTotalSec: 0,
+        });
+        return;
+      }
+      setPaused(false);
+      pausedSinceRef.current = null;
+      writeTimerStorage({
+        ...p,
+        v: 3,
+        paused: false,
+        breakRemainingSec: null,
+        breakTotalSec: bt,
+      });
+      return;
+    }
+
     if (p.paused) {
       const rem = Math.min(p.remaining, p.durationSec);
       timerEndsAtRef.current = null;
       setRemaining(rem);
       setRunning(true);
       setPaused(true);
+      sessionPhaseRef.current = "focus";
+      setSessionPhase("focus");
       postFocusStatus(null);
       const since = p.pausedSince ?? Date.now();
       pausedSinceRef.current = since;
       schedulePauseNudge(since);
       writeTimerStorage({
-        v: 2,
+        v: 3,
         selectedId: p.selectedId,
         durationSec: p.durationSec,
         presetIdx: p.presetIdx,
         paused: true,
+        sessionPhase: "focus",
         remaining: rem,
         endsAt: null,
         pausedSince: since,
+        overtimeSec: 0,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
       });
       return;
     }
@@ -533,47 +764,72 @@ export function ActivityApp({
       return;
     }
 
-    timerEndsAtRef.current = p.endsAt;
     const left = Math.max(0, Math.ceil((p.endsAt - Date.now()) / 1000));
     if (left <= 0) {
+      const drift = Math.max(0, Math.floor((Date.now() - p.endsAt) / 1000));
       timerEndsAtRef.current = null;
-      clearTimerStorage();
+      sessionPhaseRef.current = "overtime";
+      setSessionPhase("overtime");
+      setOvertimeSec(drift);
+      overtimeSecRef.current = drift;
       setRemaining(0);
-      setRunning(false);
+      setRunning(true);
       setPaused(false);
-      completedMeta.current = {
-        projectId: p.selectedId,
+      pausedSinceRef.current = null;
+      celebrationFiredRef.current = true;
+      postFocusStatus(null);
+      setBreakOfferOpen(false);
+      breakEndsAtRef.current = null;
+      breakRemainingSecRef.current = null;
+      setBreakRemaining(0);
+      setBreakTotalSec(0);
+      writeTimerStorage({
+        v: 3,
+        selectedId: p.selectedId,
         durationSec: p.durationSec,
-      };
-      setSaveProjectId(p.selectedId);
-      setSessionSaveHint({
-        durationSec: p.durationSec,
-        early: false,
+        presetIdx: p.presetIdx,
+        paused: false,
+        sessionPhase: "overtime",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: null,
+        overtimeSec: drift,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
       });
-      setShowSave(true);
       return;
     }
+
+    sessionPhaseRef.current = "focus";
+    setSessionPhase("focus");
+    timerEndsAtRef.current = p.endsAt;
     setRemaining(left);
     setRunning(true);
     setPaused(false);
     pausedSinceRef.current = null;
     postFocusStatus(p.endsAt, p.selectedId);
     writeTimerStorage({
-      v: 2,
+      v: 3,
       selectedId: p.selectedId,
       durationSec: p.durationSec,
       presetIdx: p.presetIdx,
       paused: false,
+      sessionPhase: "focus",
       remaining: left,
       endsAt: p.endsAt,
       pausedSince: null,
+      overtimeSec: 0,
+      breakEndsAt: null,
+      breakRemainingSec: null,
+      breakTotalSec: 0,
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- one-shot hydrate; schedulePauseNudge is intentional
   }, [initialProjects]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   useEffect(() => {
-    if (!running || paused) return;
+    if (!running || paused || sessionPhase !== "focus") return;
     const tick = () => {
       syncFromEndTime(true);
     };
@@ -583,10 +839,95 @@ export function ActivityApp({
     return () => {
       clearTick();
     };
-  }, [running, paused, syncFromEndTime]);
+  }, [running, paused, sessionPhase, syncFromEndTime]);
+
+  useEffect(() => {
+    if (!running || paused || sessionPhase !== "overtime") return;
+    const id = window.setInterval(() => {
+      setOvertimeSec((s) => {
+        const n = s + 1;
+        overtimeSecRef.current = n;
+        return n;
+      });
+    }, 1000);
+    return () => clearInterval(id);
+  }, [running, paused, sessionPhase]);
+
+  useEffect(() => {
+    if (!running || paused || sessionPhase !== "break") return;
+    const tick = () => {
+      const end = breakEndsAtRef.current;
+      if (end == null) return;
+      const left = Math.max(0, Math.ceil((end - Date.now()) / 1000));
+      setBreakRemaining(left);
+      if (left > 0) return;
+      sessionPhaseRef.current = "overtime";
+      setSessionPhase("overtime");
+      breakEndsAtRef.current = null;
+      breakRemainingSecRef.current = null;
+      setBreakTotalSec(0);
+      writeTimerStorage({
+        v: 3,
+        selectedId: selectedIdRef.current,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: false,
+        sessionPhase: "overtime",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: null,
+        overtimeSec: overtimeSecRef.current,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
+      });
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [running, paused, sessionPhase]);
+
+  useEffect(() => {
+    if (!running || sessionPhase !== "overtime") return;
+    writeTimerStorage({
+      v: 3,
+      selectedId: selectedIdRef.current,
+      durationSec: durationSecRef.current,
+      presetIdx: presetIdxRef.current,
+      paused,
+      sessionPhase: "overtime",
+      remaining: 0,
+      endsAt: null,
+      pausedSince: paused ? pausedSinceRef.current : null,
+      overtimeSec,
+      breakEndsAt: null,
+      breakRemainingSec: null,
+      breakTotalSec: 0,
+    });
+  }, [running, paused, sessionPhase, overtimeSec]);
+
+  useEffect(() => {
+    if (!running || sessionPhase !== "break" || paused) return;
+    writeTimerStorage({
+      v: 3,
+      selectedId: selectedIdRef.current,
+      durationSec: durationSecRef.current,
+      presetIdx: presetIdxRef.current,
+      paused: false,
+      sessionPhase: "break",
+      remaining: 0,
+      endsAt: null,
+      pausedSince: null,
+      overtimeSec: overtimeSecRef.current,
+      breakEndsAt: breakEndsAtRef.current,
+      breakRemainingSec: null,
+      breakTotalSec,
+    });
+  }, [running, paused, sessionPhase, breakRemaining, breakTotalSec]);
 
   useEffect(() => {
     if (!running || paused) return;
+    if (sessionPhase !== "focus") return;
     const onVisible = () => {
       if (document.visibilityState === "visible") {
         syncFromEndTime(true);
@@ -601,7 +942,7 @@ export function ActivityApp({
       document.removeEventListener("visibilitychange", onVisible);
       window.removeEventListener("focus", onFocus);
     };
-  }, [running, paused, syncFromEndTime]);
+  }, [running, paused, sessionPhase, syncFromEndTime]);
 
   function applyPreset(idx: number) {
     if (running || arming) return;
@@ -624,48 +965,159 @@ export function ActivityApp({
   function pauseSession() {
     if (!running || paused || arming) return;
     clearTick();
-    timerEndsAtRef.current = null;
-    const rem = remainingRef.current;
+    const phase = sessionPhaseRef.current;
     const since = Date.now();
     pausedSinceRef.current = since;
     setPaused(true);
     requestTimerNotifyPermissionIfNeeded();
-    writeTimerStorage({
-      v: 2,
-      selectedId: selectedIdRef.current,
-      durationSec: durationSecRef.current,
-      presetIdx: presetIdxRef.current,
-      paused: true,
-      remaining: rem,
-      endsAt: null,
-      pausedSince: since,
-    });
-    postFocusStatus(null);
-    schedulePauseNudge(since);
+
+    if (phase === "focus") {
+      timerEndsAtRef.current = null;
+      const rem = remainingRef.current;
+      writeTimerStorage({
+        v: 3,
+        selectedId: selectedIdRef.current,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: true,
+        sessionPhase: "focus",
+        remaining: rem,
+        endsAt: null,
+        pausedSince: since,
+        overtimeSec: 0,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
+      });
+      postFocusStatus(null);
+      schedulePauseNudge(since);
+      return;
+    }
+
+    if (phase === "overtime") {
+      writeTimerStorage({
+        v: 3,
+        selectedId: selectedIdRef.current,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: true,
+        sessionPhase: "overtime",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: since,
+        overtimeSec: overtimeSecRef.current,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
+      });
+      postFocusStatus(null);
+      schedulePauseNudge(since);
+      return;
+    }
+
+    if (phase === "break") {
+      const end = breakEndsAtRef.current;
+      const remBr =
+        end != null
+          ? Math.max(0, Math.ceil((end - Date.now()) / 1000))
+          : breakRemaining;
+      breakEndsAtRef.current = null;
+      breakRemainingSecRef.current = remBr;
+      setBreakRemaining(remBr);
+      writeTimerStorage({
+        v: 3,
+        selectedId: selectedIdRef.current,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: true,
+        sessionPhase: "break",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: since,
+        overtimeSec: overtimeSecRef.current,
+        breakEndsAt: null,
+        breakRemainingSec: remBr,
+        breakTotalSec,
+      });
+      schedulePauseNudge(since);
+    }
   }
 
   async function resumeTimer() {
     if (!running || !paused || arming) return;
+    const phase = sessionPhaseRef.current;
     setArming(true);
     try {
-      const rem = remainingRef.current;
-      const endsAt = Date.now() + rem * 1000;
-      timerEndsAtRef.current = endsAt;
+      clearPauseNudge();
       pausedSinceRef.current = null;
       setPaused(false);
-      clearPauseNudge();
-      writeTimerStorage({
-        v: 2,
-        selectedId: selectedIdRef.current,
-        durationSec: durationSecRef.current,
-        presetIdx: presetIdxRef.current,
-        paused: false,
-        remaining: rem,
-        endsAt,
-        pausedSince: null,
-      });
-      postFocusStatus(endsAt, selectedIdRef.current);
-      setRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+      if (phase === "focus") {
+        const rem = remainingRef.current;
+        const endsAt = Date.now() + rem * 1000;
+        timerEndsAtRef.current = endsAt;
+        writeTimerStorage({
+          v: 3,
+          selectedId: selectedIdRef.current,
+          durationSec: durationSecRef.current,
+          presetIdx: presetIdxRef.current,
+          paused: false,
+          sessionPhase: "focus",
+          remaining: rem,
+          endsAt,
+          pausedSince: null,
+          overtimeSec: 0,
+          breakEndsAt: null,
+          breakRemainingSec: null,
+          breakTotalSec: 0,
+        });
+        postFocusStatus(endsAt, selectedIdRef.current);
+        setRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+        return;
+      }
+      if (phase === "overtime") {
+        writeTimerStorage({
+          v: 3,
+          selectedId: selectedIdRef.current,
+          durationSec: durationSecRef.current,
+          presetIdx: presetIdxRef.current,
+          paused: false,
+          sessionPhase: "overtime",
+          remaining: 0,
+          endsAt: null,
+          pausedSince: null,
+          overtimeSec: overtimeSecRef.current,
+          breakEndsAt: null,
+          breakRemainingSec: null,
+          breakTotalSec: 0,
+        });
+        postFocusStatus(null);
+        return;
+      }
+      if (phase === "break") {
+        const rem =
+          breakRemainingSecRef.current != null
+            ? breakRemainingSecRef.current
+            : Math.max(0, breakRemaining);
+        const endsAt = Date.now() + rem * 1000;
+        breakEndsAtRef.current = endsAt;
+        breakRemainingSecRef.current = null;
+        setBreakRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
+        writeTimerStorage({
+          v: 3,
+          selectedId: selectedIdRef.current,
+          durationSec: durationSecRef.current,
+          presetIdx: presetIdxRef.current,
+          paused: false,
+          sessionPhase: "break",
+          remaining: 0,
+          endsAt: null,
+          pausedSince: null,
+          overtimeSec: overtimeSecRef.current,
+          breakEndsAt: endsAt,
+          breakRemainingSec: null,
+          breakTotalSec,
+        });
+      }
     } finally {
       setArming(false);
     }
@@ -691,6 +1143,15 @@ export function ActivityApp({
       }
       requestTimerNotifyPermissionIfNeeded();
       await playStartCountdown();
+      celebrationFiredRef.current = false;
+      sessionPhaseRef.current = "focus";
+      setSessionPhase("focus");
+      setOvertimeSec(0);
+      overtimeSecRef.current = 0;
+      breakEndsAtRef.current = null;
+      breakRemainingSecRef.current = null;
+      setBreakRemaining(0);
+      setBreakOfferOpen(false);
       const dur = durationSecRef.current;
       const sid = selectedIdRef.current;
       const endsAt = Date.now() + dur * 1000;
@@ -701,14 +1162,19 @@ export function ActivityApp({
       pausedSinceRef.current = null;
       clearPauseNudge();
       writeTimerStorage({
-        v: 2,
+        v: 3,
         selectedId: sid,
         durationSec: dur,
         presetIdx: capturedPresetIdx,
         paused: false,
+        sessionPhase: "focus",
         remaining: Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)),
         endsAt,
         pausedSince: null,
+        overtimeSec: 0,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
       });
       postFocusStatus(endsAt, selectedIdRef.current);
     } finally {
@@ -751,6 +1217,8 @@ export function ActivityApp({
     setPendingDiscard(false);
     clearTick();
     timerEndsAtRef.current = null;
+    breakEndsAtRef.current = null;
+    breakRemainingSecRef.current = null;
     clearTimerStorage();
     setRunning(false);
     setPaused(false);
@@ -758,6 +1226,67 @@ export function ActivityApp({
     setRemaining(durationSecRef.current);
     pausedSinceRef.current = null;
     postFocusStatus(null);
+    celebrationFiredRef.current = false;
+    sessionPhaseRef.current = "focus";
+    setSessionPhase("focus");
+    setOvertimeSec(0);
+    overtimeSecRef.current = 0;
+    setBreakRemaining(0);
+    setBreakOfferOpen(false);
+    setBreakTotalSec(0);
+  }
+
+  function submitBreakFromOffer() {
+    const m = Math.max(1, Math.min(120, Math.floor(breakDraftMinutes || 5)));
+    const sec = m * 60;
+    setBreakTotalSec(sec);
+    sessionPhaseRef.current = "break";
+    setSessionPhase("break");
+    const end = Date.now() + sec * 1000;
+    breakEndsAtRef.current = end;
+    breakRemainingSecRef.current = null;
+    setBreakRemaining(Math.max(0, Math.ceil((end - Date.now()) / 1000)));
+    setBreakOfferOpen(false);
+    writeTimerStorage({
+      v: 3,
+      selectedId: selectedIdRef.current,
+      durationSec: durationSecRef.current,
+      presetIdx: presetIdxRef.current,
+      paused: false,
+      sessionPhase: "break",
+      remaining: 0,
+      endsAt: null,
+      pausedSince: null,
+      overtimeSec: overtimeSecRef.current,
+      breakEndsAt: end,
+      breakRemainingSec: null,
+      breakTotalSec: sec,
+    });
+  }
+
+  function endBreakEarly() {
+    if (sessionPhaseRef.current !== "break") return;
+    sessionPhaseRef.current = "overtime";
+    setSessionPhase("overtime");
+    breakEndsAtRef.current = null;
+    breakRemainingSecRef.current = null;
+    setBreakRemaining(0);
+    setBreakTotalSec(0);
+    writeTimerStorage({
+      v: 3,
+      selectedId: selectedIdRef.current,
+      durationSec: durationSecRef.current,
+      presetIdx: presetIdxRef.current,
+      paused: false,
+      sessionPhase: "overtime",
+      remaining: 0,
+      endsAt: null,
+      pausedSince: null,
+      overtimeSec: overtimeSecRef.current,
+      breakEndsAt: null,
+      breakRemainingSec: null,
+      breakTotalSec: 0,
+    });
   }
 
   function stopAndLogSession() {
@@ -767,6 +1296,43 @@ export function ActivityApp({
       pendingDiscardTimerRef.current = null;
     }
     setPendingDiscard(false);
+    const phase = sessionPhaseRef.current;
+
+    if (phase === "overtime" || phase === "break") {
+      clearTick();
+      timerEndsAtRef.current = null;
+      breakEndsAtRef.current = null;
+      breakRemainingSecRef.current = null;
+      clearTimerStorage();
+      setRunning(false);
+      setPaused(false);
+      clearPauseNudge();
+      pausedSinceRef.current = null;
+      postFocusStatus(null);
+      const logged = durationSecToStore(
+        durationSecRef.current + overtimeSecRef.current,
+      );
+      completedMeta.current = {
+        projectId: selectedIdRef.current,
+        durationSec: logged,
+      };
+      setSaveProjectId(selectedIdRef.current);
+      setSessionSaveHint({
+        durationSec: logged,
+        early: true,
+      });
+      setShowSave(true);
+      celebrationFiredRef.current = false;
+      sessionPhaseRef.current = "focus";
+      setSessionPhase("focus");
+      setOvertimeSec(0);
+      overtimeSecRef.current = 0;
+      setBreakRemaining(0);
+      setBreakOfferOpen(false);
+      setBreakTotalSec(0);
+      return;
+    }
+
     const total = durationSecRef.current;
     const end = timerEndsAtRef.current;
     const rem =
@@ -841,6 +1407,13 @@ export function ActivityApp({
       setSaveProjectId(null);
       setSessionSaveHint(null);
       setRemaining(durationSec);
+      sessionPhaseRef.current = "focus";
+      setSessionPhase("focus");
+      setOvertimeSec(0);
+      overtimeSecRef.current = 0;
+      setBreakRemaining(0);
+      setBreakOfferOpen(false);
+      setBreakTotalSec(0);
       hapticSuccess();
       void loadAll();
     } finally {
@@ -959,6 +1532,13 @@ export function ActivityApp({
           completedMeta.current = null;
           setSessionSaveHint(null);
           setRemaining(durationSec);
+          sessionPhaseRef.current = "focus";
+          setSessionPhase("focus");
+          setOvertimeSec(0);
+          overtimeSecRef.current = 0;
+          setBreakRemaining(0);
+          setBreakOfferOpen(false);
+          setBreakTotalSec(0);
         }}
       />
     );
@@ -1034,6 +1614,10 @@ export function ActivityApp({
             durationSec={durationSec}
             running={running}
             paused={paused}
+            sessionPhase={sessionPhase}
+            overtimeSec={overtimeSec}
+            breakRemaining={breakRemaining}
+            breakTotalSec={breakTotalSec}
             presetIdx={presetIdx}
             onApplyPreset={applyPreset}
             customHours={customHm.h}
@@ -1045,6 +1629,8 @@ export function ActivityApp({
             }
             onStopAndLog={() => stopAndLogSession()}
             onDiscardTap={() => onDiscardTap()}
+            onEndBreakEarly={endBreakEarly}
+            onOpenBreakOffer={() => setBreakOfferOpen(true)}
             pendingDiscard={pendingDiscard}
           />
 
@@ -1087,6 +1673,15 @@ export function ActivityApp({
           refreshEntryFeeds={refreshEntryFeeds}
         />
       </div>
+      <TimerBreakOffer
+        open={breakOfferOpen}
+        breakMinutes={breakDraftMinutes}
+        onBreakMinutesChange={(m) =>
+          setBreakDraftMinutes(Math.max(1, Math.min(120, Math.floor(m) || 1)))
+        }
+        onStartBreak={submitBreakFromOffer}
+        onNotNow={() => setBreakOfferOpen(false)}
+      />
     </div>
   );
 }

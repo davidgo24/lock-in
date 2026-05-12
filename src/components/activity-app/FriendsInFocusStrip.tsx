@@ -61,7 +61,7 @@ export function FriendsInFocusStrip(props: {
   }
 
   return (
-    <section className="mb-6 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm">
+    <section className="mb-2 rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10">
       <p className="text-[10px] font-semibold uppercase tracking-wider text-[var(--app-muted)]">
         Friends in focus
       </p>
