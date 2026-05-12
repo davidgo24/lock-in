@@ -1,6 +1,7 @@
 "use client";
 
 import { ThemeToggle } from "@/components/ThemeToggle";
+import { formatDurationLabel } from "@/lib/activity-dashboard-format";
 
 type SaveProject = { id: string; name: string; isMisc: boolean };
 
@@ -15,7 +16,6 @@ type Props = {
   onSaveSession: () => void;
   onLogout: () => void | Promise<void>;
   onBackToDashboard: () => void;
-  formatDurationLabel: (sec: number) => string;
 };
 
 export function SaveSessionScreens({
@@ -28,7 +28,6 @@ export function SaveSessionScreens({
   onSaveSession,
   onLogout,
   onBackToDashboard,
-  formatDurationLabel,
 }: Props) {
   if (missingProject || !saveProject) {
     return (

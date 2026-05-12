@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { hapticLight } from "@/lib/haptics";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   WorkEntriesFeed,
@@ -125,7 +126,10 @@ export function CommunitySidebar({
         new Date(b.activeFocusEndsAt!).getTime(),
     );
   return (
-    <aside className="order-3 min-w-0 xl:sticky xl:top-4 xl:self-start">
+    <aside
+      id="dash-section-community"
+      className="dash-section-anchor order-3 min-w-0 xl:sticky xl:top-4 xl:self-start"
+    >
       <div
         className="mb-3 flex gap-1 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-1 shadow-sm"
         role="tablist"
@@ -140,7 +144,10 @@ export function CommunitySidebar({
               ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
               : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
           }`}
-          onClick={() => onSidebarTab("you")}
+          onClick={() => {
+            hapticLight();
+            onSidebarTab("you");
+          }}
         >
           You
         </button>
@@ -153,7 +160,10 @@ export function CommunitySidebar({
               ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
               : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
           }`}
-          onClick={() => onSidebarTab("community")}
+          onClick={() => {
+            hapticLight();
+            onSidebarTab("community");
+          }}
         >
           Community
           {friendsState.incoming.length > 0 ? (
@@ -210,7 +220,10 @@ export function CommunitySidebar({
                   ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
                   : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
               }`}
-              onClick={() => setCommunitySubTab("live")}
+              onClick={() => {
+                hapticLight();
+                setCommunitySubTab("live");
+              }}
             >
               Online now
               {focusingFriends.length > 0 ? (
@@ -228,7 +241,10 @@ export function CommunitySidebar({
                   ? "bg-[var(--app-accent-muted)] text-[var(--foreground)]"
                   : "text-[var(--app-muted)] hover:text-[var(--foreground)]"
               }`}
-              onClick={() => setCommunitySubTab("friends")}
+              onClick={() => {
+                hapticLight();
+                setCommunitySubTab("friends");
+              }}
             >
               Friends
               {friendsState.incoming.length > 0 ? (
@@ -260,7 +276,10 @@ export function CommunitySidebar({
                   <button
                     type="button"
                     className="font-medium text-[var(--app-accent)] underline"
-                    onClick={() => setCommunitySubTab("friends")}
+                    onClick={() => {
+                      hapticLight();
+                      setCommunitySubTab("friends");
+                    }}
                   >
                     Friends
                   </button>{" "}

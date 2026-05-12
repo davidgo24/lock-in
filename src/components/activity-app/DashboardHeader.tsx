@@ -3,6 +3,7 @@
 import type { RefObject } from "react";
 import Link from "next/link";
 import { Bell, Flame, LogOut, Trophy, User } from "lucide-react";
+import { hapticLight } from "@/lib/haptics";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { StatsBundle } from "@/lib/stats";
 import type { ActivityNotificationRow } from "@/lib/work-client";
@@ -51,7 +52,10 @@ export function DashboardHeader({
         <div className="relative" ref={notifPanelRef}>
           <button
             type="button"
-            onClick={() => void onToggleNotifPanel()}
+            onClick={() => {
+              hapticLight();
+              void onToggleNotifPanel();
+            }}
             className={`relative inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border bg-[var(--app-surface-card)] px-2.5 py-2 text-[var(--foreground)] active:opacity-90 ${
               notif.unreadCount > 0
                 ? "border-rose-500/70 ring-2 ring-rose-500/35 ring-offset-2 ring-offset-[var(--background)] dark:border-rose-400/60 dark:ring-rose-400/30"
@@ -111,6 +115,7 @@ export function DashboardHeader({
         </div>
         <Link
           href="/profile"
+          onClick={() => hapticLight()}
           className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] text-[var(--foreground)] hover:bg-[var(--background)]/50"
           aria-label="Your profile"
         >
@@ -119,7 +124,10 @@ export function DashboardHeader({
         <ThemeToggle />
         <button
           type="button"
-          onClick={() => void onLogout()}
+          onClick={() => {
+            hapticLight();
+            void onLogout();
+          }}
           className="inline-flex min-h-10 items-center justify-center gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-3 py-2 text-xs font-medium text-[var(--foreground)] sm:text-sm"
         >
           <LogOut className="h-3.5 w-3.5 shrink-0" />

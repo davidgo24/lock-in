@@ -97,6 +97,28 @@ body {
   -webkit-tap-highlight-color: transparent;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+.dash-section-anchor {
+  scroll-margin-top: 5.75rem;
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .app-pressable:active {
+    transform: scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-pressable:active {
+    opacity: 0.92;
+  }
+}
+
 .font-display {
   font-family: var(--font-dm-serif), ui-serif, Georgia, serif;
 }

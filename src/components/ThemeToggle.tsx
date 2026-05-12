@@ -4,6 +4,7 @@ import { Moon, Sun } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import type { ThemeMode } from "@/lib/theme";
 import { THEME_STORAGE_KEY } from "@/lib/theme";
+import { hapticLight } from "@/lib/haptics";
 
 export function setThemeMode(mode: ThemeMode) {
   document.documentElement.setAttribute("data-theme", mode);
@@ -28,6 +29,7 @@ export function ThemeToggle({
   }, []);
 
   const toggle = useCallback(() => {
+    hapticLight();
     const next: ThemeMode =
       document.documentElement.getAttribute("data-theme") === "light"
         ? "dark"
