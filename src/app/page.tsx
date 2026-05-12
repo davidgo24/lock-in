@@ -85,10 +85,10 @@ export default async function Home() {
   }));
 
   return (
-    <div className="min-h-dvh w-full max-w-[100vw] overflow-x-clip bg-[var(--background)]">
+    <div className="min-h-svh w-full max-w-[100vw] overflow-x-clip bg-[var(--background)]">
       <Suspense
         fallback={
-          <div className="flex min-h-dvh items-center justify-center text-sm text-[var(--app-muted)]">
+          <div className="flex min-h-svh items-center justify-center text-sm text-[var(--app-muted)]">
             Loading…
           </div>
         }

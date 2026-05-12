@@ -51,7 +51,7 @@ export default function RootLayout({
       suppressHydrationWarning
       className={`${inter.variable} ${dmSerif.variable} h-full antialiased`}
     >
-      <body className="min-h-dvh max-w-[100vw] flex flex-col overflow-x-clip font-sans">
+      <body className="min-h-svh max-w-[100vw] flex flex-col overflow-x-clip font-sans">
         <Script
           id="theme-init"
           strategy="beforeInteractive"

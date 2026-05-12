@@ -965,7 +965,7 @@ export function ActivityApp({
   }
 
   return (
-    <div className="mx-auto box-border min-h-dvh w-full min-w-0 max-w-[1400px] px-3 py-5 sm:px-5 sm:py-7 pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <div className="mx-auto box-border min-h-svh w-full min-w-0 max-w-[1400px] px-3 py-5 sm:px-5 sm:py-7 pb-[max(1rem,env(safe-area-inset-bottom))]">
       <DashboardHeader
         appName={appName}
         stats={stats}
