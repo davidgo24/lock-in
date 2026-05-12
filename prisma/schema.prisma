@@ -111,10 +111,12 @@ model ActivitySession {
   @@index([projectId])
 }
 
-/// One clap per user per session (friend activity).
+/// One reaction (emoji) per user per session (friend activity).
 model ActivityClap {
   sessionId String
   userId    String
+  /// Single grapheme shown in the feed (validated in application code).
+  emoji     String   @default("👏")
   session   ActivitySession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
   user      User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   createdAt DateTime        @default(now())

@@ -24,6 +24,8 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     title: appName,
+    // Full-bleed under status bar; we pad with env(safe-area-inset-*).
+    // “Add to Home Screen” runs as display-mode: standalone (see `standalone-display.ts`).
     statusBarStyle: "black-translucent",
   },
   formatDetection: {

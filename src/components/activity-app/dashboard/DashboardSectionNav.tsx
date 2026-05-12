@@ -2,6 +2,7 @@
 
 import { Clock, Folder, LayoutGrid, Users } from "lucide-react";
 import { hapticLight } from "@/lib/haptics";
+import { isStandaloneWebApp } from "@/lib/standalone-display";
 
 const sections = [
   { id: "dash-section-timer", label: "Timer", icon: Clock },
@@ -11,8 +12,15 @@ const sections = [
 ] as const;
 
 function scrollToId(id: string) {
-  document.getElementById(id)?.scrollIntoView({
-    behavior: "smooth",
+  const el = document.getElementById(id);
+  if (!el) return;
+  // Installed / “Add to Home Screen” web apps use a standalone web view where
+  // smooth scroll + `position: sticky` often jitters; in-tab Safari is fine.
+  const reduceMotion =
+    typeof window !== "undefined" &&
+    window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  el.scrollIntoView({
+    behavior: reduceMotion || isStandaloneWebApp() ? "auto" : "smooth",
     block: "start",
   });
 }

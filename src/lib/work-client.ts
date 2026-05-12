@@ -23,6 +23,8 @@ export type ApiWorkEntry = {
   social?: {
     clapCount: number;
     clappedByMe: boolean;
+    myReactionEmoji: string | null;
+    reactionBreakdown: { emoji: string; count: number }[];
     comments: {
       authorLabel: string;
       authorUserId: string;

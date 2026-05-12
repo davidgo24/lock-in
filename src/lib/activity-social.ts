@@ -1,6 +1,7 @@
 import type { ActivityNotificationType } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
 import { areFriends, publicLabel } from "@/lib/friends";
+import { normalizeReactionEmoji } from "@/lib/emoji-reaction";
 
 const COMMENT_MAX = 500;
 
@@ -12,11 +13,24 @@ export type ActivitySocialComment = {
   createdAt: string;
 };
 
+export type ReactionBreakdownRow = { emoji: string; count: number };
+
 export type ActivitySocialPayload = {
   clapCount: number;
   clappedByMe: boolean;
+  /** Your current reaction emoji, if any. */
+  myReactionEmoji: string | null;
+  /** Per-emoji counts for this session. */
+  reactionBreakdown: ReactionBreakdownRow[];
   comments: ActivitySocialComment[];
   myComment: string | null;
+};
+
+export type ReactionMutationResult = {
+  clappedByMe: boolean;
+  clapCount: number;
+  myReactionEmoji: string | null;
+  reactionBreakdown: ReactionBreakdownRow[];
 };
 
 export async function getSessionOwnerId(sessionId: string): Promise<string | null> {
@@ -81,23 +95,52 @@ export async function notifyActivityEvent(opts: {
   });
 }
 
-export async function toggleClap(viewerId: string, sessionId: string): Promise<{
-  clappedByMe: boolean;
-  clapCount: number;
-}> {
+async function reactionBreakdownForSession(
+  sessionId: string,
+): Promise<ReactionBreakdownRow[]> {
+  const rows = await prisma.activityClap.groupBy({
+    by: ["emoji"],
+    where: { sessionId },
+    _count: { emoji: true },
+  });
+  return rows
+    .map((r) => ({ emoji: r.emoji, count: r._count.emoji }))
+    .sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji));
+}
+
+/**
+ * Set or toggle a single-emoji reaction. Same emoji again removes it; a different emoji replaces.
+ */
+export async function setReactionEmoji(
+  viewerId: string,
+  sessionId: string,
+  rawEmoji: string,
+): Promise<ReactionMutationResult> {
+  const normalized = normalizeReactionEmoji(rawEmoji);
+  if (!normalized) {
+    const err = new Error("Pick one emoji.") as Error & { code: string };
+    err.code = "BAD_REQUEST";
+    throw err;
+  }
+
   const { ownerId } = await assertFriendCanReact(viewerId, sessionId);
 
   const existing = await prisma.activityClap.findUnique({
     where: { sessionId_userId: { sessionId, userId: viewerId } },
   });
 
-  if (existing) {
+  if (existing && existing.emoji === normalized) {
     await prisma.activityClap.delete({
       where: { sessionId_userId: { sessionId, userId: viewerId } },
     });
+  } else if (existing) {
+    await prisma.activityClap.update({
+      where: { sessionId_userId: { sessionId, userId: viewerId } },
+      data: { emoji: normalized },
+    });
   } else {
     await prisma.activityClap.create({
-      data: { sessionId, userId: viewerId },
+      data: { sessionId, userId: viewerId, emoji: normalized },
     });
     await notifyActivityEvent({
       recipientId: ownerId,
@@ -108,7 +151,17 @@ export async function toggleClap(viewerId: string, sessionId: string): Promise<{
   }
 
   const clapCount = await prisma.activityClap.count({ where: { sessionId } });
-  return { clappedByMe: !existing, clapCount };
+  const my = await prisma.activityClap.findUnique({
+    where: { sessionId_userId: { sessionId, userId: viewerId } },
+    select: { emoji: true },
+  });
+  const reactionBreakdown = await reactionBreakdownForSession(sessionId);
+  return {
+    clappedByMe: my != null,
+    clapCount,
+    myReactionEmoji: my?.emoji ?? null,
+    reactionBreakdown,
+  };
 }
 
 export async function upsertActivityComment(
@@ -194,15 +247,10 @@ export async function getSocialBySessionIds(
   const map = new Map<string, ActivitySocialPayload>();
   if (sessionIds.length === 0) return map;
 
-  const [counts, myClap, allComments, myComments] = await Promise.all([
-    prisma.activityClap.groupBy({
-      by: ["sessionId"],
-      where: { sessionId: { in: sessionIds } },
-      _count: { sessionId: true },
-    }),
+  const [clapRows, allComments, myComments] = await Promise.all([
     prisma.activityClap.findMany({
-      where: { sessionId: { in: sessionIds }, userId: viewerId },
-      select: { sessionId: true },
+      where: { sessionId: { in: sessionIds } },
+      select: { sessionId: true, userId: true, emoji: true },
     }),
     prisma.activityComment.findMany({
       where: { sessionId: { in: sessionIds } },
@@ -220,10 +268,28 @@ export async function getSocialBySessionIds(
     }),
   ]);
 
-  const countMap = Object.fromEntries(
-    counts.map((c) => [c.sessionId, c._count.sessionId]),
+  const countMap: Record<string, number> = {};
+  const breakdownMaps = new Map<string, Map<string, number>>();
+  const myReactionMap: Record<string, string> = {};
+
+  for (const sid of sessionIds) {
+    countMap[sid] = 0;
+    breakdownMaps.set(sid, new Map());
+  }
+  for (const row of clapRows) {
+    countMap[row.sessionId] = (countMap[row.sessionId] ?? 0) + 1;
+    const m = breakdownMaps.get(row.sessionId);
+    if (m) {
+      m.set(row.emoji, (m.get(row.emoji) ?? 0) + 1);
+    }
+    if (row.userId === viewerId) {
+      myReactionMap[row.sessionId] = row.emoji;
+    }
+  }
+
+  const myClapSet = new Set(
+    Object.entries(myReactionMap).map(([sessionId]) => sessionId),
   );
-  const myClapSet = new Set(myClap.map((c) => c.sessionId));
   const myCommentMap = Object.fromEntries(
     myComments.map((c) => [c.sessionId, c.body]),
   );
@@ -237,9 +303,17 @@ export async function getSocialBySessionIds(
   }
 
   for (const sid of sessionIds) {
+    const bm = breakdownMaps.get(sid);
+    const reactionBreakdown: ReactionBreakdownRow[] = bm
+      ? [...bm.entries()]
+          .map(([emoji, count]) => ({ emoji, count }))
+          .sort((a, b) => b.count - a.count || a.emoji.localeCompare(b.emoji))
+      : [];
     map.set(sid, {
       clapCount: countMap[sid] ?? 0,
       clappedByMe: myClapSet.has(sid),
+      myReactionEmoji: myReactionMap[sid] ?? null,
+      reactionBreakdown,
       comments: commentsBySession.get(sid) ?? [],
       myComment: myCommentMap[sid] ?? null,
     });

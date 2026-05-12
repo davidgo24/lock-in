@@ -68,6 +68,8 @@ export function mapFriendFeedEntryToClient(
   const s: ActivitySocialPayload = social ?? {
     clapCount: 0,
     clappedByMe: false,
+    myReactionEmoji: null,
+    reactionBreakdown: [],
     comments: [],
     myComment: null,
   };
@@ -94,6 +96,8 @@ export function mapRecentEntryToClient(
   const s: ActivitySocialPayload = social ?? {
     clapCount: 0,
     clappedByMe: false,
+    myReactionEmoji: null,
+    reactionBreakdown: [],
     comments: [],
     myComment: null,
   };
