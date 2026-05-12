@@ -1,7 +1,8 @@
 "use client";
 
 import type { RefObject } from "react";
-import { Bell, Flame, LogOut, Trophy } from "lucide-react";
+import Link from "next/link";
+import { Bell, Flame, LogOut, Trophy, User } from "lucide-react";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { StatsBundle } from "@/lib/stats";
 import type { ActivityNotificationRow } from "@/lib/work-client";
@@ -108,6 +109,13 @@ export function DashboardHeader({
             </div>
           ) : null}
         </div>
+        <Link
+          href="/profile"
+          className="inline-flex min-h-10 min-w-10 items-center justify-center rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] text-[var(--foreground)] hover:bg-[var(--background)]/50"
+          aria-label="Your profile"
+        >
+          <User className="h-4 w-4" />
+        </Link>
         <ThemeToggle />
         <button
           type="button"

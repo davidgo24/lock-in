@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { hash } from "bcryptjs";
 import { prisma } from "@/lib/prisma";
 import { ensureDefaultData } from "@/lib/bootstrap";
+import { ensureWelcomeFriendship } from "@/lib/welcome-friend";
 import { COOKIE, createSessionToken } from "@/lib/auth";
 import { checkRateLimit, clientKeyFromRequest } from "@/lib/rate-limit";
 import { logWarn } from "@/lib/log";
@@ -95,6 +96,7 @@ export async function POST(req: Request) {
   });
 
   await ensureDefaultData(user.id);
+  await ensureWelcomeFriendship(user.id).catch(() => {});
 
   const token = await createSessionToken(user.id);
   const res = NextResponse.json({ ok: true });

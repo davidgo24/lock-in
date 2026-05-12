@@ -42,6 +42,7 @@ import {
 import { SaveSessionScreens } from "@/components/activity-app/SaveSessionScreens";
 import { DashboardHeader } from "@/components/activity-app/DashboardHeader";
 import { CommunitySidebar } from "@/components/activity-app/CommunitySidebar";
+import { FriendsInFocusStrip } from "@/components/activity-app/FriendsInFocusStrip";
 import type { ApiWorkEntry, ActivityNotificationRow } from "@/lib/work-client";
 import { parseWorkEntryFromApi } from "@/lib/work-client";
 import {
@@ -221,6 +222,8 @@ export function ActivityApp({
 
   const remainingRef = useRef(remaining);
   const timerEndsAtRef = useRef<number | null>(null);
+  /** Wall time when pause began — for persisting project switches while paused. */
+  const pausedSinceRef = useRef<number | null>(null);
   const [workEntries, setWorkEntries] =
     useState<WorkEntryRow[]>(initialWorkEntries);
   const [friendFeed, setFriendFeed] =
@@ -499,6 +502,39 @@ export function ActivityApp({
     remainingRef.current = remaining;
   }, [remaining]);
 
+  /** Keep server focus + localStorage aligned if the user switches focus area mid-session. */
+  useEffect(() => {
+    if (!running || arming) return;
+    if (!paused) {
+      const end = timerEndsAtRef.current;
+      if (end == null) return;
+      postFocusStatus(end, selectedId);
+      writeTimerStorage({
+        v: 2,
+        selectedId,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: false,
+        remaining: Math.max(0, Math.ceil((end - Date.now()) / 1000)),
+        endsAt: end,
+        pausedSince: null,
+      });
+      return;
+    }
+    const since = pausedSinceRef.current;
+    if (since == null) return;
+    writeTimerStorage({
+      v: 2,
+      selectedId,
+      durationSec: durationSecRef.current,
+      presetIdx: presetIdxRef.current,
+      paused: true,
+      remaining: remainingRef.current,
+      endsAt: null,
+      pausedSince: since,
+    });
+  }, [selectedId, running, paused, arming]);
+
   function clearTick() {
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -542,6 +578,7 @@ export function ActivityApp({
     clearTimerStorage();
     setRunning(false);
     setPaused(false);
+    pausedSinceRef.current = null;
     clearPauseNudge();
     const pid = selectedIdRef.current;
     const dur = durationSecRef.current;
@@ -588,6 +625,7 @@ export function ActivityApp({
       setPaused(true);
       postFocusStatus(null);
       const since = p.pausedSince ?? Date.now();
+      pausedSinceRef.current = since;
       schedulePauseNudge(since);
       writeTimerStorage({
         v: 2,
@@ -630,6 +668,7 @@ export function ActivityApp({
     setRemaining(left);
     setRunning(true);
     setPaused(false);
+    pausedSinceRef.current = null;
     postFocusStatus(p.endsAt, p.selectedId);
     writeTimerStorage({
       v: 2,
@@ -700,6 +739,7 @@ export function ActivityApp({
     timerEndsAtRef.current = null;
     const rem = remainingRef.current;
     const since = Date.now();
+    pausedSinceRef.current = since;
     setPaused(true);
     requestTimerNotifyPermissionIfNeeded();
     writeTimerStorage({
@@ -723,6 +763,7 @@ export function ActivityApp({
       const rem = remainingRef.current;
       const endsAt = Date.now() + rem * 1000;
       timerEndsAtRef.current = endsAt;
+      pausedSinceRef.current = null;
       setPaused(false);
       clearPauseNudge();
       writeTimerStorage({
@@ -769,6 +810,7 @@ export function ActivityApp({
       setRemaining(Math.max(0, Math.ceil((endsAt - Date.now()) / 1000)));
       setRunning(true);
       setPaused(false);
+      pausedSinceRef.current = null;
       clearPauseNudge();
       writeTimerStorage({
         v: 2,
@@ -826,6 +868,7 @@ export function ActivityApp({
     setPaused(false);
     clearPauseNudge();
     setRemaining(durationSecRef.current);
+    pausedSinceRef.current = null;
     postFocusStatus(null);
   }
 
@@ -850,6 +893,7 @@ export function ActivityApp({
       setRunning(false);
       setPaused(false);
       clearPauseNudge();
+      pausedSinceRef.current = null;
       setRemaining(total);
       postFocusStatus(null);
       setDashNotice({
@@ -864,6 +908,7 @@ export function ActivityApp({
     setRunning(false);
     setPaused(false);
     clearPauseNudge();
+    pausedSinceRef.current = null;
     postFocusStatus(null);
     const logged = durationSecToStore(rawElapsed);
     completedMeta.current = {
@@ -1265,6 +1310,11 @@ export function ActivityApp({
         </div>
       ) : null}
 
+      <FriendsInFocusStrip
+        friendsState={friendsState}
+        avatarCacheBust={avatarCacheBust}
+      />
+
       <div className="mt-6 flex flex-col gap-8 xl:grid xl:grid-cols-[260px_minmax(0,1fr)_minmax(0,300px)] xl:items-start xl:gap-8">
         <aside className="order-2 min-w-0 xl:sticky xl:top-4 xl:order-1 xl:self-start">
           <div className="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] p-4 shadow-lg shadow-black/10 backdrop-blur-sm sm:p-5">
@@ -1282,7 +1332,7 @@ export function ActivityApp({
                   <li key={p.id}>
                     <button
                       type="button"
-                      disabled={running || arming}
+                      disabled={arming}
                       onClick={() => setSelectedId(p.id)}
                       className={`flex w-full min-h-[4.25rem] items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition ${
                         active
@@ -1469,10 +1519,14 @@ export function ActivityApp({
               <label className="text-xs font-medium uppercase tracking-wide text-[var(--app-muted)]">
                 Focus area
               </label>
+              <p className="mt-1 text-[11px] leading-snug text-[var(--app-muted)]">
+                You can switch focus area while the timer runs — your save will
+                use whichever area is selected when you finish.
+              </p>
               <select
                 className="mt-1 min-h-11 w-full appearance-none rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-base text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2 disabled:opacity-60"
                 value={selectedId}
-                disabled={running || arming}
+                disabled={arming}
                 onChange={(e) => setSelectedId(e.target.value)}
               >
                 {projects.map((p) => (

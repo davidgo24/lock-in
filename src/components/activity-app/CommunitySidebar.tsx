@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   WorkEntriesFeed,
@@ -273,10 +274,11 @@ export function CommunitySidebar({
               ) : (
                 <ul className="mt-4 space-y-2">
                   {focusingFriends.map((f) => (
-                    <li
-                      key={f.userId}
-                      className="flex gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2.5"
-                    >
+                    <li key={f.userId}>
+                      <Link
+                        href={`/friends/${f.userId}`}
+                        className="flex gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2.5 transition hover:bg-[var(--background)]/55"
+                      >
                       <FriendMiniAvatar
                         userId={f.userId}
                         hasAvatar={f.hasAvatar}
@@ -314,6 +316,7 @@ export function CommunitySidebar({
                           ) : null}
                         </div>
                       </div>
+                    </Link>
                     </li>
                   ))}
                 </ul>
@@ -341,7 +344,13 @@ export function CommunitySidebar({
                 Pick a unique handle, then send a request. They accept — you
                 both see each other&apos;s session logs (not one-way follows).
                 Friends see your note and which focus area you used for each
-                block.
+                block.{" "}
+                <Link
+                  href="/profile"
+                  className="font-medium text-[var(--app-accent)] underline underline-offset-2"
+                >
+                  Full profile page
+                </Link>
               </p>
 
               {friendNotice ? (
@@ -632,7 +641,10 @@ export function CommunitySidebar({
                           key={f.userId}
                           className="flex items-center justify-between gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2"
                         >
-                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                          <Link
+                            href={`/friends/${f.userId}`}
+                            className="flex min-w-0 flex-1 items-center gap-2"
+                          >
                             <FriendMiniAvatar
                               userId={f.userId}
                               hasAvatar={f.hasAvatar}
@@ -650,7 +662,7 @@ export function CommunitySidebar({
                                 </span>
                               ) : null}
                             </span>
-                          </div>
+                          </Link>
                           <button
                             type="button"
                             className={`shrink-0 text-xs underline ${

@@ -1,6 +1,6 @@
 import type { Prisma } from "@prisma/client";
 import { prisma } from "@/lib/prisma";
-import { getFriendUserIds, publicLabel } from "@/lib/friends";
+import { areFriends, getFriendUserIds, publicLabel } from "@/lib/friends";
 import type { ActivitySocialPayload } from "@/lib/activity-social";
 import { getSocialBySessionIds } from "@/lib/activity-social";
 
@@ -119,6 +119,32 @@ export async function getFriendFeedForClient(viewerId: string) {
 
 export async function getRecentEntriesForClient(viewerId: string) {
   const rows = await getRecentWorkEntries(viewerId);
+  const ids = rows.map((r) => r.id);
+  const socialMap = await getSocialBySessionIds(ids, viewerId);
+  return rows.map((r) =>
+    mapRecentEntryToClient(r, socialMap.get(r.id) ?? null),
+  );
+}
+
+/** Friend's sessions for profile view; null if not friends or user missing. */
+export async function getRecentEntriesForFriendProfile(
+  viewerId: string,
+  friendUserId: string,
+) {
+  const ok = await areFriends(viewerId, friendUserId);
+  if (!ok) return null;
+  const friendRow = await prisma.user.findUnique({
+    where: { id: friendUserId },
+    select: { id: true },
+  });
+  if (!friendRow) return null;
+
+  const rows = await prisma.activitySession.findMany({
+    where: { project: { is: { userId: friendUserId } } },
+    take: 40,
+    orderBy: { createdAt: "desc" },
+    select: workEntrySelect,
+  });
   const ids = rows.map((r) => r.id);
   const socialMap = await getSocialBySessionIds(ids, viewerId);
   return rows.map((r) =>

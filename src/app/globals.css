@@ -2,16 +2,16 @@
 
 /* Default = dark (before theme script runs). */
 :root {
-  --background: #090b10;
-  --foreground: #e8e4df;
-  --app-surface: #121520;
-  --app-surface-card: rgba(18, 21, 32, 0.78);
-  --app-accent: #c7614a;
-  --app-accent-hover: #d4785c;
-  --app-accent-muted: rgba(199, 97, 74, 0.22);
-  --app-border: rgba(199, 97, 74, 0.25);
-  --app-muted: #8a8580;
-  --app-highlight: #fbbf24;
+  --background: #07080d;
+  --foreground: #eceaf2;
+  --app-surface: #101018;
+  --app-surface-card: rgba(16, 17, 28, 0.85);
+  --app-accent: #7c6cf0;
+  --app-accent-hover: #9487f5;
+  --app-accent-muted: rgba(124, 108, 240, 0.18);
+  --app-border: rgba(124, 108, 240, 0.28);
+  --app-muted: #9a95a8;
+  --app-highlight: #c4b5fd;
   /* Contribution heatmap */
   --heat-0: #44403c;
   --heat-1: #431407;
@@ -23,16 +23,16 @@
 }
 
 html[data-theme="dark"] {
-  --background: #090b10;
-  --foreground: #e8e4df;
-  --app-surface: #121520;
-  --app-surface-card: rgba(18, 21, 32, 0.78);
-  --app-accent: #c7614a;
-  --app-accent-hover: #d4785c;
-  --app-accent-muted: rgba(199, 97, 74, 0.22);
-  --app-border: rgba(199, 97, 74, 0.25);
-  --app-muted: #8a8580;
-  --app-highlight: #fbbf24;
+  --background: #07080d;
+  --foreground: #eceaf2;
+  --app-surface: #101018;
+  --app-surface-card: rgba(16, 17, 28, 0.85);
+  --app-accent: #7c6cf0;
+  --app-accent-hover: #9487f5;
+  --app-accent-muted: rgba(124, 108, 240, 0.18);
+  --app-border: rgba(124, 108, 240, 0.28);
+  --app-muted: #9a95a8;
+  --app-highlight: #c4b5fd;
   --heat-0: #44403c;
   --heat-1: #431407;
   --heat-2: #9a3412;

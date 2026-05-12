@@ -50,6 +50,14 @@ export function SignupClient() {
         <p className="mt-1 text-sm text-[var(--app-muted)]">
           Create an account to run focus timers and keep an honest log.
         </p>
+        <p className="mt-3 rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 px-3 py-2 text-xs leading-relaxed text-[var(--app-muted)]">
+          New accounts are connected as friends with{" "}
+          <span className="font-medium text-[var(--foreground)]">
+            @imtiredboss
+          </span>{" "}
+          so you have someone in your network from day one. You can ignore or
+          manage that friendship like any other in Community.
+        </p>
         <form className="mt-6 space-y-4" onSubmit={(e) => void onSubmit(e)}>
           <div>
             <label className="text-xs font-medium text-[var(--app-muted)]">
