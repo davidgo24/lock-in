@@ -31,8 +31,10 @@ import { SaveSessionScreens } from "@/components/activity-app/SaveSessionScreens
 import { DashboardHeader } from "@/components/activity-app/DashboardHeader";
 import { CommunitySidebar } from "@/components/activity-app/CommunitySidebar";
 import { FriendsInFocusStrip } from "@/components/activity-app/FriendsInFocusStrip";
-import { MobileTabBar } from "@/components/activity-app/MobileTabBar";
-import { DashboardSectionNav } from "@/components/activity-app/dashboard/DashboardSectionNav";
+import {
+  MobileTabBar,
+  type DashboardMobileTab,
+} from "@/components/activity-app/MobileTabBar";
 import { FocusAreasSidebar } from "@/components/activity-app/dashboard/FocusAreasSidebar";
 import { FocusTimerPanel } from "@/components/activity-app/dashboard/FocusTimerPanel";
 import { DashboardInsightsPanel } from "@/components/activity-app/dashboard/DashboardInsightsPanel";
@@ -161,9 +163,7 @@ export function ActivityApp({
   const [sidebarTab, setSidebarTab] = useState<"you" | "community">(() =>
     initialFriendsState.incoming.length > 0 ? "community" : "you",
   );
-  const [mobilePrimaryTab, setMobilePrimaryTab] = useState<"focus" | "social">(
-    "focus",
-  );
+  const [mobileTab, setMobileTab] = useState<DashboardMobileTab>("timer");
   const [viewerHasAvatar, setViewerHasAvatar] = useState(initialViewerHasAvatar);
   const [avatarCacheBust, setAvatarCacheBust] = useState(0);
   const [dashNotice, setDashNotice] = useState<FriendNotice | null>(null);
@@ -354,16 +354,21 @@ export function ActivityApp({
     }
   }
 
-  /* `?tab=community` / `?tab=social` — sync URL (notifications, profile nav) → UI; strip tab from bar. */
+  /* `?tab=*` — sync URL (notifications, profile nav) → UI; strip tab from bar. */
   useLayoutEffect(() => {
     const tab = searchParams.get("tab");
     if (tab === "community") {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- `tab` query param is external navigation state
       setSidebarTab("community");
-      setMobilePrimaryTab("social");
-    }
-    if (tab === "social") {
-      setMobilePrimaryTab("social");
+      setMobileTab("social");
+    } else if (tab === "social") {
+      setMobileTab("social");
+    } else if (tab === "timer") {
+      setMobileTab("timer");
+    } else if (tab === "progress") {
+      setMobileTab("progress");
+    } else if (tab === "areas") {
+      setMobileTab("areas");
     }
     if (typeof window !== "undefined" && tab) {
       const url = new URL(window.location.href);
@@ -376,6 +381,7 @@ export function ActivityApp({
     const n = friendsState.incoming.length;
     if (n > prevIncomingCountRef.current) {
       setSidebarTab("community");
+      setMobileTab("social");
     }
     prevIncomingCountRef.current = n;
   }, [friendsState.incoming.length]);
@@ -1660,7 +1666,7 @@ export function ActivityApp({
   }
 
   return (
-    <div className="mx-auto box-border min-h-svh w-full min-w-0 max-w-[1400px] px-3 py-5 pb-[calc(4.5rem+max(0.5rem,env(safe-area-inset-bottom)))] sm:px-5 sm:py-7 xl:pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <div className="mx-auto box-border min-h-svh w-full min-w-0 max-w-[1400px] px-3 py-5 pb-[calc(5rem+max(0.5rem,env(safe-area-inset-bottom)))] sm:px-5 sm:py-7 xl:pb-[max(1rem,env(safe-area-inset-bottom))]">
       <DashboardHeader
         appName={appName}
         stats={stats}
@@ -1693,24 +1699,24 @@ export function ActivityApp({
         </div>
       ) : null}
 
-      <FriendsInFocusStrip
-        friendsState={friendsState}
-        avatarCacheBust={avatarCacheBust}
-      />
-
-      {mobilePrimaryTab === "focus" ? (
-        <DashboardSectionNav
-          onCommunityNavigate={() => setMobilePrimaryTab("social")}
+      <div
+        className={
+          mobileTab === "areas" || mobileTab === "social"
+            ? "max-xl:hidden"
+            : undefined
+        }
+      >
+        <FriendsInFocusStrip
+          friendsState={friendsState}
+          avatarCacheBust={avatarCacheBust}
         />
-      ) : null}
+      </div>
 
       <div className="mt-4 flex flex-col gap-8 xl:grid xl:grid-cols-[260px_minmax(0,1fr)_minmax(0,300px)] xl:items-start xl:gap-8">
         <div
-          className={
-            mobilePrimaryTab === "social"
-              ? "hidden xl:contents"
-              : "xl:contents"
-          }
+          className={[mobileTab !== "areas" && "max-xl:hidden", "xl:contents"]
+            .filter(Boolean)
+            .join(" ")}
         >
           <FocusAreasSidebar
             projects={projects}
@@ -1731,76 +1737,93 @@ export function ActivityApp({
         </div>
 
         <div
-          className={
-            mobilePrimaryTab === "social"
-              ? "hidden xl:contents"
-              : "xl:contents"
-          }
+          className={[
+            (mobileTab === "social" || mobileTab === "areas") &&
+              "max-xl:hidden",
+            "xl:contents",
+          ]
+            .filter(Boolean)
+            .join(" ")}
         >
-        <main className="order-1 flex min-w-0 flex-col gap-6 xl:order-2">
-          <FocusTimerPanel
-            selectedProject={selectedProject}
-            projects={projects}
-            selectedId={selectedId}
-            onSelectProject={setSelectedId}
-            arming={arming}
-            remaining={remaining}
-            durationSec={durationSec}
-            running={running}
-            paused={paused}
-            sessionPhase={sessionPhase}
-            overtimeSec={overtimeSec}
-            breakRemaining={breakRemaining}
-            breakTotalSec={breakTotalSec}
-            presetIdx={presetIdx}
-            onApplyPreset={applyPreset}
-            customHours={customHm.h}
-            customMinutes={customHm.m}
-            onCustomHoursMinutesChange={applyCustomHoursMinutes}
-            onStartSession={() => void startTimer()}
-            onPauseOrResume={() =>
-              paused ? void resumeTimer() : pauseSession()
-            }
-            onStopAndLog={() => stopAndLogSession()}
-            onDiscardTap={() => onDiscardTap()}
-            onEndBreakEarly={endBreakEarly}
-            onOpenBreakOffer={() => setBreakOfferOpen(true)}
-            pendingDiscard={pendingDiscard}
-          />
+          <main className="order-1 flex min-w-0 flex-col gap-6 xl:order-2">
+            <div
+              className={[mobileTab !== "timer" && "max-xl:hidden", "xl:block"]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <FocusTimerPanel
+                selectedProject={selectedProject}
+                projects={projects}
+                selectedId={selectedId}
+                onSelectProject={setSelectedId}
+                arming={arming}
+                remaining={remaining}
+                durationSec={durationSec}
+                running={running}
+                paused={paused}
+                sessionPhase={sessionPhase}
+                overtimeSec={overtimeSec}
+                breakRemaining={breakRemaining}
+                breakTotalSec={breakTotalSec}
+                presetIdx={presetIdx}
+                onApplyPreset={applyPreset}
+                customHours={customHm.h}
+                customMinutes={customHm.m}
+                onCustomHoursMinutesChange={applyCustomHoursMinutes}
+                onStartSession={() => void startTimer()}
+                onPauseOrResume={() =>
+                  paused ? void resumeTimer() : pauseSession()
+                }
+                onStopAndLog={() => stopAndLogSession()}
+                onDiscardTap={() => onDiscardTap()}
+                onEndBreakEarly={endBreakEarly}
+                onOpenBreakOffer={() => setBreakOfferOpen(true)}
+                pendingDiscard={pendingDiscard}
+              />
+            </div>
 
-          <DashboardInsightsPanel
-            stats={stats}
-            totalLabel={totalLabel}
-            weeklyPct={weeklyPct}
-            goalEdit={goalEdit}
-            goalDraft={goalDraft}
-            onGoalDraftChange={setGoalDraft}
-            onBeginGoalEdit={() => {
-              setGoalDraft(String(stats?.weeklyGoalHours.toFixed(1) ?? "7"));
-              setGoalEdit(true);
-            }}
-            onSaveWeeklyGoal={() =>
-              void (async () => {
-                const v = Number(goalDraft);
-                await fetch("/api/settings", {
-                  method: "PATCH",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ weeklyGoalHours: v }),
-                });
-                setGoalEdit(false);
-                void loadAll();
-              })()
-            }
-          />
-        </main>
+            <div
+              className={[
+                mobileTab !== "progress" && "max-xl:hidden",
+                "xl:block",
+              ]
+                .filter(Boolean)
+                .join(" ")}
+            >
+              <DashboardInsightsPanel
+                stats={stats}
+                totalLabel={totalLabel}
+                weeklyPct={weeklyPct}
+                goalEdit={goalEdit}
+                goalDraft={goalDraft}
+                onGoalDraftChange={setGoalDraft}
+                onBeginGoalEdit={() => {
+                  setGoalDraft(
+                    String(stats?.weeklyGoalHours.toFixed(1) ?? "7"),
+                  );
+                  setGoalEdit(true);
+                }}
+                onSaveWeeklyGoal={() =>
+                  void (async () => {
+                    const v = Number(goalDraft);
+                    await fetch("/api/settings", {
+                      method: "PATCH",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ weeklyGoalHours: v }),
+                    });
+                    setGoalEdit(false);
+                    void loadAll();
+                  })()
+                }
+              />
+            </div>
+          </main>
         </div>
 
         <div
-          className={
-            mobilePrimaryTab === "focus"
-              ? "max-xl:hidden xl:contents"
-              : "xl:contents"
-          }
+          className={[mobileTab !== "social" && "max-xl:hidden", "xl:contents"]
+            .filter(Boolean)
+            .join(" ")}
         >
           <CommunitySidebar
             displayName={displayName}
@@ -1817,8 +1840,8 @@ export function ActivityApp({
         </div>
       </div>
       <MobileTabBar
-        dashboardTab={mobilePrimaryTab}
-        onDashboardTabChange={setMobilePrimaryTab}
+        dashboardTab={mobileTab}
+        onDashboardTabChange={setMobileTab}
       />
       <TimerBreakOffer
         open={breakOfferOpen}

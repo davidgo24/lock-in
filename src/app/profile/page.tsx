@@ -34,7 +34,7 @@ export default async function ProfilePage() {
     user.displayName?.trim() || (user.handle ? `@${user.handle}` : "You");
 
   return (
-    <div className="relative mx-auto min-h-dvh max-w-lg px-4 py-8 pb-[calc(4.5rem+max(0.5rem,env(safe-area-inset-bottom)))] xl:pb-[max(2rem,env(safe-area-inset-bottom))]">
+    <div className="relative mx-auto min-h-dvh max-w-lg px-4 py-8 pb-[calc(5rem+max(0.5rem,env(safe-area-inset-bottom)))] xl:pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 flex gap-2 sm:right-4 sm:top-4">
         <ThemeToggle />
       </div>
