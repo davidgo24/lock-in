@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 import {
   REACTION_QUICK_PICKS,
   normalizeReactionEmoji,
@@ -128,6 +129,8 @@ function FriendEntryRow({
   const initial = label.charAt(0).toUpperCase() || "?";
   const [commentDraft, setCommentDraft] = useState(social.myComment ?? "");
   const [busy, setBusy] = useState<"clap" | "comment" | "delete" | null>(null);
+  /** Quick-pick grid + custom emoji — hidden until user opens. */
+  const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   /** Emoji keyboard — type or paste one emoji, then Add. */
   const [customReactionOpen, setCustomReactionOpen] = useState(false);
   const [customReactionDraft, setCustomReactionDraft] = useState("");
@@ -153,6 +156,7 @@ function FriendEntryRow({
         body: JSON.stringify({ emoji }),
       });
       if (!res.ok) return;
+      setReactionPickerOpen(false);
       setCustomReactionOpen(false);
       setCustomReactionDraft("");
       await runRefresh();
@@ -241,90 +245,138 @@ function FriendEntryRow({
           </p>
 
           <div className="mt-3 border-t border-[var(--app-border)] pt-3">
-            <p className="text-[12px] font-medium uppercase tracking-wide text-[var(--app-muted)]">
-              React
-            </p>
-            <div className="mt-2 flex flex-wrap gap-1.5">
-              {REACTION_QUICK_PICKS.map((emo) => {
-                const active = social.myReactionEmoji === emo;
-                return (
-                  <button
-                    key={emo}
-                    type="button"
-                    disabled={busy !== null}
-                    title={
-                      active ? `Remove ${emo}` : `React with ${emo}`
-                    }
-                    onClick={() => void sendReaction(emo)}
-                    className={`flex h-10 min-w-10 items-center justify-center rounded-lg border text-lg leading-none transition active:scale-[0.97] disabled:opacity-50 ${
-                      active
-                        ? "border-[var(--app-accent)] bg-[var(--app-accent-muted)] shadow-inner"
-                        : "border-[var(--app-border)] bg-[var(--app-surface-card)]"
-                    }`}
-                  >
-                    <span aria-hidden>{emo}</span>
-                    <span className="sr-only">
-                      {active ? `Remove reaction ${emo}` : `React ${emo}`}
+            <div className="flex flex-wrap items-start justify-between gap-2">
+              <div className="min-w-0 flex flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--app-muted)]">
+                {social.reactionBreakdown.length > 0 ? (
+                  <>
+                    {social.reactionBreakdown.map(({ emoji, count }) => (
+                      <span
+                        key={emoji}
+                        className="inline-flex items-center gap-0.5 tabular-nums"
+                      >
+                        <span aria-hidden>{emoji}</span>
+                        <span>{count}</span>
+                      </span>
+                    ))}
+                    <span className="text-[var(--app-muted)]/80">
+                      · {social.clapCount}{" "}
+                      {social.clapCount === 1 ? "reaction" : "reactions"}
                     </span>
-                  </button>
-                );
-              })}
+                  </>
+                ) : (
+                  <span className="text-[var(--app-muted)]/90">
+                    Reactions stay hidden until you add one.
+                  </span>
+                )}
+              </div>
               <button
                 type="button"
                 disabled={busy !== null}
                 onClick={() => {
-                  setCustomReactionOpen((o) => !o);
-                  setCustomReactionDraft(social.myReactionEmoji ?? "");
+                  setReactionPickerOpen((o) => {
+                    const next = !o;
+                    if (!next) {
+                      setCustomReactionOpen(false);
+                      setCustomReactionDraft("");
+                    }
+                    return next;
+                  });
                 }}
-                className="flex h-10 min-w-10 items-center justify-center rounded-lg border border-dashed border-[var(--app-border)] bg-[var(--background)]/50 text-sm font-semibold text-[var(--app-muted)] disabled:opacity-50"
-                aria-expanded={customReactionOpen}
+                className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2.5 py-1.5 text-xs font-medium text-[var(--foreground)] disabled:opacity-50"
+                aria-expanded={reactionPickerOpen}
               >
-                +
-                <span className="sr-only">Custom emoji</span>
+                {reactionPickerOpen ? (
+                  <>
+                    Close
+                    <ChevronUp className="h-3.5 w-3.5 opacity-70" aria-hidden />
+                  </>
+                ) : (
+                  <>
+                    React
+                    <ChevronDown className="h-3.5 w-3.5 opacity-70" aria-hidden />
+                  </>
+                )}
               </button>
             </div>
-            {customReactionOpen ? (
-              <div className="mt-2 flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)]/60 p-2 sm:flex-row sm:items-end">
-                <div className="min-w-0 flex-1">
-                  <label className="text-[11px] text-[var(--app-muted)]">
-                    One emoji — use your keyboard&apos;s emoji key
-                  </label>
-                  <input
-                    type="text"
-                    value={customReactionDraft}
-                    onChange={(ev) => setCustomReactionDraft(ev.target.value)}
-                    placeholder="Tap 😀 …"
-                    className="mt-1 min-h-10 w-full rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-base text-[var(--foreground)]"
-                    autoCapitalize="off"
-                    autoCorrect="off"
-                  />
-                </div>
-                <button
-                  type="button"
-                  disabled={busy !== null}
-                  onClick={() => void addCustomReaction()}
-                  className="min-h-10 shrink-0 rounded-lg bg-[var(--app-accent)] px-4 text-sm font-medium text-white disabled:opacity-50"
-                >
-                  {busy === "clap" ? "…" : "Set"}
-                </button>
-              </div>
-            ) : null}
-            {social.reactionBreakdown.length > 0 ? (
-              <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-[var(--app-muted)]">
-                {social.reactionBreakdown.map(({ emoji, count }) => (
-                  <span
-                    key={emoji}
-                    className="inline-flex items-center gap-0.5 tabular-nums"
+            {reactionPickerOpen ? (
+              <>
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {REACTION_QUICK_PICKS.map((emo) => {
+                    const active = social.myReactionEmoji === emo;
+                    return (
+                      <button
+                        key={emo}
+                        type="button"
+                        disabled={busy !== null}
+                        title={
+                          active ? `Remove ${emo}` : `React with ${emo}`
+                        }
+                        onClick={() => void sendReaction(emo)}
+                        className={`flex h-10 min-w-10 items-center justify-center rounded-lg border text-lg leading-none transition active:scale-[0.97] disabled:opacity-50 ${
+                          active
+                            ? "border-[var(--app-accent)] bg-[var(--app-accent-muted)] shadow-inner"
+                            : "border-[var(--app-border)] bg-[var(--app-surface-card)]"
+                        }`}
+                      >
+                        <span aria-hidden>{emo}</span>
+                        <span className="sr-only">
+                          {active
+                            ? `Remove reaction ${emo}`
+                            : `React ${emo}`}
+                        </span>
+                      </button>
+                    );
+                  })}
+                  <button
+                    type="button"
+                    disabled={busy !== null}
+                    onClick={() => {
+                      setCustomReactionOpen((o) => !o);
+                      setCustomReactionDraft(social.myReactionEmoji ?? "");
+                    }}
+                    className="flex h-10 min-w-10 items-center justify-center rounded-lg border border-dashed border-[var(--app-border)] bg-[var(--background)]/50 text-sm font-semibold text-[var(--app-muted)] disabled:opacity-50"
+                    aria-expanded={customReactionOpen}
                   >
-                    <span aria-hidden>{emoji}</span>
-                    <span>{count}</span>
-                  </span>
-                ))}
-                <span className="text-[var(--app-muted)]/80">
-                  · {social.clapCount}{" "}
-                  {social.clapCount === 1 ? "reaction" : "reactions"}
-                </span>
-              </p>
+                    +
+                    <span className="sr-only">Custom emoji</span>
+                  </button>
+                </div>
+                {customReactionOpen ? (
+                  <div className="mt-2 flex flex-col gap-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)]/60 p-2 sm:flex-row sm:items-end">
+                    <div className="min-w-0 flex-1">
+                      <label
+                        htmlFor={`custom-reaction-${e.id}`}
+                        className="text-[11px] text-[var(--app-muted)]"
+                      >
+                        Optional: switch keyboard to emoji, enter one, then Set
+                      </label>
+                      <input
+                        id={`custom-reaction-${e.id}`}
+                        type="text"
+                        value={customReactionDraft}
+                        onChange={(ev) =>
+                          setCustomReactionDraft(ev.target.value)
+                        }
+                        placeholder=""
+                        enterKeyHint="done"
+                        autoComplete="off"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        className="mt-1 min-h-10 w-full rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-3 py-2 text-base text-[var(--foreground)]"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={() => void addCustomReaction()}
+                      className="min-h-10 shrink-0 rounded-lg bg-[var(--app-accent)] px-4 text-sm font-medium text-white disabled:opacity-50"
+                    >
+                      {busy === "clap" ? "…" : "Set"}
+                    </button>
+                  </div>
+                ) : null}
+              </>
             ) : null}
           </div>
 

@@ -27,7 +27,18 @@ export type PersistedTimerV3 = {
   remaining: number;
   endsAt: number | null;
   pausedSince: number | null;
+  /**
+   * With `sessionPhase === "overtime"` and not paused: seconds accumulated before
+   * `overtimeRunStartedAt` (wall-clock segment). When paused or in `break`, this is
+   * the full overtime total (same as displayed).
+   */
   overtimeSec: number;
+  /**
+   * Epoch ms when the current overtime *running* segment began; null if overtime is
+   * paused or not counting (e.g. during break). Omit in older stored data → hydrate
+   * treats as legacy tick-based total in `overtimeSec`.
+   */
+  overtimeRunStartedAt: number | null;
   breakEndsAt: number | null;
   /** When `sessionPhase === "break"` and paused: frozen seconds left on the break timer. */
   breakRemainingSec: number | null;
@@ -84,6 +95,15 @@ export function parsePersisted(raw: string | null): PersistedTimerV3 | null {
       ) {
         return null;
       }
+      const ortRaw = (
+        p as Partial<{ overtimeRunStartedAt: unknown }>
+      ).overtimeRunStartedAt;
+      const overtimeRunStartedAt =
+        ortRaw == null
+          ? null
+          : typeof ortRaw === "number" && Number.isFinite(ortRaw)
+            ? ortRaw
+            : null;
       return {
         v: 3,
         selectedId: p.selectedId,
@@ -95,6 +115,7 @@ export function parsePersisted(raw: string | null): PersistedTimerV3 | null {
         endsAt: p.endsAt ?? null,
         pausedSince: p.pausedSince ?? null,
         overtimeSec: Math.max(0, Math.floor(p.overtimeSec)),
+        overtimeRunStartedAt,
         breakEndsAt: p.breakEndsAt ?? null,
         breakRemainingSec:
           brRem == null ? null : Math.max(0, Math.floor(brRem)),
@@ -139,6 +160,7 @@ export function parsePersisted(raw: string | null): PersistedTimerV3 | null {
         endsAt: p.endsAt ?? null,
         pausedSince: p.pausedSince ?? null,
         overtimeSec: 0,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -169,6 +191,7 @@ export function parsePersisted(raw: string | null): PersistedTimerV3 | null {
         endsAt: p.endsAt,
         pausedSince: null,
         overtimeSec: 0,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -217,6 +240,7 @@ export function tryMigrateLegacyV1Key(): PersistedTimerV3 | null {
       pausedSince: null,
       sessionPhase: "focus",
       overtimeSec: 0,
+      overtimeRunStartedAt: null,
       breakEndsAt: null,
       breakRemainingSec: null,
       breakTotalSec: 0,

@@ -118,6 +118,10 @@ export function ActivityApp({
 
   const sessionPhaseRef = useRef<SessionPhase>("focus");
   const overtimeSecRef = useRef(0);
+  /** Baseline stored as `overtimeSec` in persistence (see `PersistedTimerV3`). */
+  const overtimeWallBaselineSecRef = useRef(0);
+  /** Wall-clock start of current overtime running segment, or null if not accruing. */
+  const overtimeRunStartedAtRef = useRef<number | null>(null);
   const breakEndsAtRef = useRef<number | null>(null);
   const breakRemainingSecRef = useRef<number | null>(null);
   const celebrationFiredRef = useRef(false);
@@ -168,6 +172,31 @@ export function ActivityApp({
     null,
   );
   const prevIncomingCountRef = useRef(initialFriendsState.incoming.length);
+
+  function readOvertimeDisplaySec(): number {
+    const b = overtimeWallBaselineSecRef.current;
+    const t0 = overtimeRunStartedAtRef.current;
+    if (t0 == null) return b;
+    return b + Math.max(0, Math.floor((Date.now() - t0) / 1000));
+  }
+
+  /** Fold an in-progress overtime segment into the baseline (pause, break, etc.). */
+  function foldOvertimeRunningIntoBaseline(): number {
+    const t0 = overtimeRunStartedAtRef.current;
+    const b = overtimeWallBaselineSecRef.current;
+    if (t0 == null) return b;
+    const total = b + Math.max(0, Math.floor((Date.now() - t0) / 1000));
+    overtimeWallBaselineSecRef.current = total;
+    overtimeRunStartedAtRef.current = null;
+    return total;
+  }
+
+  function resetOvertimeWall() {
+    overtimeWallBaselineSecRef.current = 0;
+    overtimeRunStartedAtRef.current = null;
+    setOvertimeSec(0);
+    overtimeSecRef.current = 0;
+  }
 
   useEffect(() => {
     presetIdxRef.current = presetIdx;
@@ -435,6 +464,7 @@ export function ActivityApp({
         endsAt: end,
         pausedSince: null,
         overtimeSec: 0,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -455,6 +485,7 @@ export function ActivityApp({
         endsAt: null,
         pausedSince: since,
         overtimeSec: 0,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -472,7 +503,10 @@ export function ActivityApp({
         remaining: 0,
         endsAt: null,
         pausedSince: paused ? pausedSinceRef.current : null,
-        overtimeSec: overtimeSecRef.current,
+        overtimeSec: overtimeWallBaselineSecRef.current,
+        overtimeRunStartedAt: paused
+          ? null
+          : overtimeRunStartedAtRef.current,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -490,7 +524,8 @@ export function ActivityApp({
         remaining: 0,
         endsAt: null,
         pausedSince: paused ? pausedSinceRef.current : null,
-        overtimeSec: overtimeSecRef.current,
+        overtimeSec: overtimeWallBaselineSecRef.current,
+        overtimeRunStartedAt: null,
         breakEndsAt: paused ? null : breakEndsAtRef.current,
         breakRemainingSec:
           paused && breakRemainingSecRef.current != null
@@ -499,7 +534,7 @@ export function ActivityApp({
         breakTotalSec,
       });
     }
-  }, [selectedId, running, paused, arming, sessionPhase, overtimeSec, breakTotalSec]);
+  }, [selectedId, running, paused, arming, sessionPhase, breakTotalSec]);
 
   function clearTick() {
     if (timerRef.current) {
@@ -544,6 +579,8 @@ export function ActivityApp({
     timerEndsAtRef.current = null;
     sessionPhaseRef.current = "overtime";
     setSessionPhase("overtime");
+    overtimeWallBaselineSecRef.current = 0;
+    overtimeRunStartedAtRef.current = Date.now();
     setOvertimeSec(0);
     overtimeSecRef.current = 0;
     setBreakTotalSec(0);
@@ -568,6 +605,7 @@ export function ActivityApp({
       endsAt: null,
       pausedSince: null,
       overtimeSec: 0,
+      overtimeRunStartedAt: Date.now(),
       breakEndsAt: null,
       breakRemainingSec: null,
       breakTotalSec: 0,
@@ -601,8 +639,8 @@ export function ActivityApp({
       celebrationFiredRef.current = true;
       sessionPhaseRef.current = "overtime";
       setSessionPhase("overtime");
-      overtimeSecRef.current = p.overtimeSec;
-      setOvertimeSec(p.overtimeSec);
+      const baseline = p.overtimeSec;
+      overtimeWallBaselineSecRef.current = baseline;
       timerEndsAtRef.current = null;
       breakEndsAtRef.current = null;
       breakRemainingSecRef.current = null;
@@ -613,6 +651,9 @@ export function ActivityApp({
       postFocusStatus(null);
       setBreakOfferOpen(false);
       if (p.paused) {
+        overtimeRunStartedAtRef.current = null;
+        setOvertimeSec(baseline);
+        overtimeSecRef.current = baseline;
         setPaused(true);
         const since = p.pausedSince ?? Date.now();
         pausedSinceRef.current = since;
@@ -626,9 +667,25 @@ export function ActivityApp({
           breakEndsAt: null,
           breakRemainingSec: null,
           breakTotalSec: 0,
+          overtimeSec: baseline,
+          overtimeRunStartedAt: null,
         });
         return;
       }
+      overtimeRunStartedAtRef.current =
+        p.overtimeRunStartedAt != null
+          ? p.overtimeRunStartedAt
+          : Date.now();
+      const disp =
+        baseline +
+        Math.max(
+          0,
+          Math.floor(
+            (Date.now() - overtimeRunStartedAtRef.current) / 1000,
+          ),
+        );
+      setOvertimeSec(disp);
+      overtimeSecRef.current = disp;
       setPaused(false);
       pausedSinceRef.current = null;
       writeTimerStorage({
@@ -641,6 +698,8 @@ export function ActivityApp({
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
+        overtimeSec: baseline,
+        overtimeRunStartedAt: overtimeRunStartedAtRef.current,
       });
       return;
     }
@@ -649,6 +708,8 @@ export function ActivityApp({
       celebrationFiredRef.current = true;
       sessionPhaseRef.current = "break";
       setSessionPhase("break");
+      overtimeWallBaselineSecRef.current = p.overtimeSec;
+      overtimeRunStartedAtRef.current = null;
       overtimeSecRef.current = p.overtimeSec;
       setOvertimeSec(p.overtimeSec);
       timerEndsAtRef.current = null;
@@ -677,6 +738,7 @@ export function ActivityApp({
           breakEndsAt: null,
           breakRemainingSec: p.breakRemainingSec,
           breakTotalSec: bt,
+          overtimeRunStartedAt: null,
         });
         return;
       }
@@ -703,6 +765,7 @@ export function ActivityApp({
         setPaused(false);
         pausedSinceRef.current = null;
         setBreakTotalSec(0);
+        overtimeRunStartedAtRef.current = Date.now();
         writeTimerStorage({
           ...p,
           v: 3,
@@ -714,7 +777,14 @@ export function ActivityApp({
           breakEndsAt: null,
           breakRemainingSec: null,
           breakTotalSec: 0,
+          overtimeSec: overtimeWallBaselineSecRef.current,
+          overtimeRunStartedAt: overtimeRunStartedAtRef.current,
         });
+        {
+          const b = overtimeWallBaselineSecRef.current;
+          setOvertimeSec(b);
+          overtimeSecRef.current = b;
+        }
         return;
       }
       setPaused(false);
@@ -725,6 +795,8 @@ export function ActivityApp({
         paused: false,
         breakRemainingSec: null,
         breakTotalSec: bt,
+        overtimeSec: overtimeWallBaselineSecRef.current,
+        overtimeRunStartedAt: null,
       });
       return;
     }
@@ -752,6 +824,7 @@ export function ActivityApp({
         endsAt: null,
         pausedSince: since,
         overtimeSec: 0,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -770,6 +843,8 @@ export function ActivityApp({
       timerEndsAtRef.current = null;
       sessionPhaseRef.current = "overtime";
       setSessionPhase("overtime");
+      overtimeWallBaselineSecRef.current = drift;
+      overtimeRunStartedAtRef.current = Date.now();
       setOvertimeSec(drift);
       overtimeSecRef.current = drift;
       setRemaining(0);
@@ -794,6 +869,7 @@ export function ActivityApp({
         endsAt: null,
         pausedSince: null,
         overtimeSec: drift,
+        overtimeRunStartedAt: Date.now(),
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -820,6 +896,7 @@ export function ActivityApp({
       endsAt: p.endsAt,
       pausedSince: null,
       overtimeSec: 0,
+      overtimeRunStartedAt: null,
       breakEndsAt: null,
       breakRemainingSec: null,
       breakTotalSec: 0,
@@ -843,13 +920,31 @@ export function ActivityApp({
 
   useEffect(() => {
     if (!running || paused || sessionPhase !== "overtime") return;
-    const id = window.setInterval(() => {
-      setOvertimeSec((s) => {
-        const n = s + 1;
-        overtimeSecRef.current = n;
-        return n;
+    const tick = () => {
+      const t0 = overtimeRunStartedAtRef.current;
+      const b = overtimeWallBaselineSecRef.current;
+      const n = t0 != null ? b + Math.floor((Date.now() - t0) / 1000) : b;
+      setOvertimeSec(n);
+      overtimeSecRef.current = n;
+      writeTimerStorage({
+        v: 3,
+        selectedId: selectedIdRef.current,
+        durationSec: durationSecRef.current,
+        presetIdx: presetIdxRef.current,
+        paused: false,
+        sessionPhase: "overtime",
+        remaining: 0,
+        endsAt: null,
+        pausedSince: null,
+        overtimeSec: b,
+        overtimeRunStartedAt: t0,
+        breakEndsAt: null,
+        breakRemainingSec: null,
+        breakTotalSec: 0,
       });
-    }, 1000);
+    };
+    tick();
+    const id = window.setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [running, paused, sessionPhase]);
 
@@ -866,6 +961,7 @@ export function ActivityApp({
       breakEndsAtRef.current = null;
       breakRemainingSecRef.current = null;
       setBreakTotalSec(0);
+      overtimeRunStartedAtRef.current = Date.now();
       writeTimerStorage({
         v: 3,
         selectedId: selectedIdRef.current,
@@ -876,35 +972,22 @@ export function ActivityApp({
         remaining: 0,
         endsAt: null,
         pausedSince: null,
-        overtimeSec: overtimeSecRef.current,
+        overtimeSec: overtimeWallBaselineSecRef.current,
+        overtimeRunStartedAt: overtimeRunStartedAtRef.current,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
       });
+      {
+        const b = overtimeWallBaselineSecRef.current;
+        setOvertimeSec(b);
+        overtimeSecRef.current = b;
+      }
     };
     tick();
     const id = window.setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [running, paused, sessionPhase]);
-
-  useEffect(() => {
-    if (!running || sessionPhase !== "overtime") return;
-    writeTimerStorage({
-      v: 3,
-      selectedId: selectedIdRef.current,
-      durationSec: durationSecRef.current,
-      presetIdx: presetIdxRef.current,
-      paused,
-      sessionPhase: "overtime",
-      remaining: 0,
-      endsAt: null,
-      pausedSince: paused ? pausedSinceRef.current : null,
-      overtimeSec,
-      breakEndsAt: null,
-      breakRemainingSec: null,
-      breakTotalSec: 0,
-    });
-  }, [running, paused, sessionPhase, overtimeSec]);
 
   useEffect(() => {
     if (!running || sessionPhase !== "break" || paused) return;
@@ -918,7 +1001,8 @@ export function ActivityApp({
       remaining: 0,
       endsAt: null,
       pausedSince: null,
-      overtimeSec: overtimeSecRef.current,
+      overtimeSec: overtimeWallBaselineSecRef.current,
+      overtimeRunStartedAt: null,
       breakEndsAt: breakEndsAtRef.current,
       breakRemainingSec: null,
       breakTotalSec,
@@ -927,22 +1011,28 @@ export function ActivityApp({
 
   useEffect(() => {
     if (!running || paused) return;
-    if (sessionPhase !== "focus") return;
-    const onVisible = () => {
-      if (document.visibilityState === "visible") {
+    const bumpWallClocks = () => {
+      const phase = sessionPhaseRef.current;
+      if (phase === "focus") {
         syncFromEndTime(true);
+      } else if (phase === "overtime") {
+        const n = readOvertimeDisplaySec();
+        setOvertimeSec(n);
+        overtimeSecRef.current = n;
       }
     };
-    const onFocus = () => {
-      syncFromEndTime(true);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") {
+        bumpWallClocks();
+      }
     };
     document.addEventListener("visibilitychange", onVisible);
-    window.addEventListener("focus", onFocus);
+    window.addEventListener("focus", bumpWallClocks);
     return () => {
       document.removeEventListener("visibilitychange", onVisible);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", bumpWallClocks);
     };
-  }, [running, paused, sessionPhase, syncFromEndTime]);
+  }, [running, paused, syncFromEndTime]);
 
   function applyPreset(idx: number) {
     if (running || arming) return;
@@ -985,6 +1075,7 @@ export function ActivityApp({
         endsAt: null,
         pausedSince: since,
         overtimeSec: 0,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -995,6 +1086,9 @@ export function ActivityApp({
     }
 
     if (phase === "overtime") {
+      const total = foldOvertimeRunningIntoBaseline();
+      setOvertimeSec(total);
+      overtimeSecRef.current = total;
       writeTimerStorage({
         v: 3,
         selectedId: selectedIdRef.current,
@@ -1005,7 +1099,8 @@ export function ActivityApp({
         remaining: 0,
         endsAt: null,
         pausedSince: since,
-        overtimeSec: overtimeSecRef.current,
+        overtimeSec: total,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -1034,7 +1129,8 @@ export function ActivityApp({
         remaining: 0,
         endsAt: null,
         pausedSince: since,
-        overtimeSec: overtimeSecRef.current,
+        overtimeSec: overtimeWallBaselineSecRef.current,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: remBr,
         breakTotalSec,
@@ -1066,6 +1162,7 @@ export function ActivityApp({
           endsAt,
           pausedSince: null,
           overtimeSec: 0,
+          overtimeRunStartedAt: null,
           breakEndsAt: null,
           breakRemainingSec: null,
           breakTotalSec: 0,
@@ -1075,6 +1172,7 @@ export function ActivityApp({
         return;
       }
       if (phase === "overtime") {
+        overtimeRunStartedAtRef.current = Date.now();
         writeTimerStorage({
           v: 3,
           selectedId: selectedIdRef.current,
@@ -1085,7 +1183,8 @@ export function ActivityApp({
           remaining: 0,
           endsAt: null,
           pausedSince: null,
-          overtimeSec: overtimeSecRef.current,
+          overtimeSec: overtimeWallBaselineSecRef.current,
+          overtimeRunStartedAt: overtimeRunStartedAtRef.current,
           breakEndsAt: null,
           breakRemainingSec: null,
           breakTotalSec: 0,
@@ -1112,7 +1211,8 @@ export function ActivityApp({
           remaining: 0,
           endsAt: null,
           pausedSince: null,
-          overtimeSec: overtimeSecRef.current,
+          overtimeSec: overtimeWallBaselineSecRef.current,
+          overtimeRunStartedAt: null,
           breakEndsAt: endsAt,
           breakRemainingSec: null,
           breakTotalSec,
@@ -1146,8 +1246,7 @@ export function ActivityApp({
       celebrationFiredRef.current = false;
       sessionPhaseRef.current = "focus";
       setSessionPhase("focus");
-      setOvertimeSec(0);
-      overtimeSecRef.current = 0;
+      resetOvertimeWall();
       breakEndsAtRef.current = null;
       breakRemainingSecRef.current = null;
       setBreakRemaining(0);
@@ -1172,6 +1271,7 @@ export function ActivityApp({
         endsAt,
         pausedSince: null,
         overtimeSec: 0,
+        overtimeRunStartedAt: null,
         breakEndsAt: null,
         breakRemainingSec: null,
         breakTotalSec: 0,
@@ -1229,14 +1329,18 @@ export function ActivityApp({
     celebrationFiredRef.current = false;
     sessionPhaseRef.current = "focus";
     setSessionPhase("focus");
-    setOvertimeSec(0);
-    overtimeSecRef.current = 0;
+    resetOvertimeWall();
     setBreakRemaining(0);
     setBreakOfferOpen(false);
     setBreakTotalSec(0);
   }
 
   function submitBreakFromOffer() {
+    if (sessionPhaseRef.current === "overtime") {
+      const total = foldOvertimeRunningIntoBaseline();
+      setOvertimeSec(total);
+      overtimeSecRef.current = total;
+    }
     const m = Math.max(1, Math.min(120, Math.floor(breakDraftMinutes || 5)));
     const sec = m * 60;
     setBreakTotalSec(sec);
@@ -1257,7 +1361,8 @@ export function ActivityApp({
       remaining: 0,
       endsAt: null,
       pausedSince: null,
-      overtimeSec: overtimeSecRef.current,
+      overtimeSec: overtimeWallBaselineSecRef.current,
+      overtimeRunStartedAt: null,
       breakEndsAt: end,
       breakRemainingSec: null,
       breakTotalSec: sec,
@@ -1272,6 +1377,10 @@ export function ActivityApp({
     breakRemainingSecRef.current = null;
     setBreakRemaining(0);
     setBreakTotalSec(0);
+    overtimeRunStartedAtRef.current = Date.now();
+    const b = overtimeWallBaselineSecRef.current;
+    setOvertimeSec(b);
+    overtimeSecRef.current = b;
     writeTimerStorage({
       v: 3,
       selectedId: selectedIdRef.current,
@@ -1282,7 +1391,8 @@ export function ActivityApp({
       remaining: 0,
       endsAt: null,
       pausedSince: null,
-      overtimeSec: overtimeSecRef.current,
+      overtimeSec: b,
+      overtimeRunStartedAt: overtimeRunStartedAtRef.current,
       breakEndsAt: null,
       breakRemainingSec: null,
       breakTotalSec: 0,
@@ -1310,7 +1420,7 @@ export function ActivityApp({
       pausedSinceRef.current = null;
       postFocusStatus(null);
       const logged = durationSecToStore(
-        durationSecRef.current + overtimeSecRef.current,
+        durationSecRef.current + readOvertimeDisplaySec(),
       );
       completedMeta.current = {
         projectId: selectedIdRef.current,
@@ -1325,8 +1435,7 @@ export function ActivityApp({
       celebrationFiredRef.current = false;
       sessionPhaseRef.current = "focus";
       setSessionPhase("focus");
-      setOvertimeSec(0);
-      overtimeSecRef.current = 0;
+      resetOvertimeWall();
       setBreakRemaining(0);
       setBreakOfferOpen(false);
       setBreakTotalSec(0);
@@ -1409,8 +1518,7 @@ export function ActivityApp({
       setRemaining(durationSec);
       sessionPhaseRef.current = "focus";
       setSessionPhase("focus");
-      setOvertimeSec(0);
-      overtimeSecRef.current = 0;
+      resetOvertimeWall();
       setBreakRemaining(0);
       setBreakOfferOpen(false);
       setBreakTotalSec(0);
@@ -1534,8 +1642,7 @@ export function ActivityApp({
           setRemaining(durationSec);
           sessionPhaseRef.current = "focus";
           setSessionPhase("focus");
-          setOvertimeSec(0);
-          overtimeSecRef.current = 0;
+          resetOvertimeWall();
           setBreakRemaining(0);
           setBreakOfferOpen(false);
           setBreakTotalSec(0);
