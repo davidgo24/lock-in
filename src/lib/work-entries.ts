@@ -139,7 +139,12 @@ export async function getRecentEntriesForFriendProfile(
   if (!ok) return null;
   const friendRow = await prisma.user.findUnique({
     where: { id: friendUserId },
-    select: { id: true },
+    select: {
+      id: true,
+      displayName: true,
+      handle: true,
+      avatarBytes: true,
+    },
   });
   if (!friendRow) return null;
 
@@ -151,7 +156,13 @@ export async function getRecentEntriesForFriendProfile(
   });
   const ids = rows.map((r) => r.id);
   const socialMap = await getSocialBySessionIds(ids, viewerId);
-  return rows.map((r) =>
-    mapRecentEntryToClient(r, socialMap.get(r.id) ?? null),
-  );
+  const authorLabel = publicLabel(friendRow);
+  const authorHasAvatar =
+    friendRow.avatarBytes != null && friendRow.avatarBytes.length > 0;
+  return rows.map((r) => ({
+    ...mapRecentEntryToClient(r, socialMap.get(r.id) ?? null),
+    authorLabel,
+    authorUserId: friendUserId,
+    authorHasAvatar,
+  }));
 }

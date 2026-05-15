@@ -25,8 +25,13 @@ function scrollToId(id: string) {
   });
 }
 
+type DashboardSectionNavProps = {
+  /** On narrow layouts, open the Social tab instead of scrolling to the community column. */
+  onCommunityNavigate?: () => void;
+};
+
 /** Sticky jump links for small screens — desktop uses the three-column layout. */
-export function DashboardSectionNav() {
+export function DashboardSectionNav({ onCommunityNavigate }: DashboardSectionNavProps) {
   return (
     <nav
       className="dash-jump-nav sticky z-40 -mx-3 mb-1 border-b border-[var(--app-border)]/35 bg-[var(--background)] px-2 pb-2 pt-2 sm:-mx-5 sm:px-3 xl:hidden"
@@ -48,6 +53,10 @@ export function DashboardSectionNav() {
               type="button"
               onClick={() => {
                 hapticLight();
+                if (id === "dash-section-community" && onCommunityNavigate) {
+                  onCommunityNavigate();
+                  return;
+                }
                 scrollToId(id);
               }}
               className="app-pressable flex min-h-11 shrink-0 snap-start items-center gap-2 rounded-xl border-2 border-[var(--app-border)] bg-[var(--background)] px-4 py-2.5 text-left text-xs font-semibold text-[var(--foreground)] shadow-sm transition-colors hover:border-[var(--app-accent)]/55 hover:bg-[var(--app-accent-muted)] active:opacity-95"

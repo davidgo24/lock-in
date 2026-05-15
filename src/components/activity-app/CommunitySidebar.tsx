@@ -204,6 +204,8 @@ export function CommunitySidebar({
               title="Friends&apos; activity"
               subtitle="Clap or leave a note on their sessions — they&apos;ll see it in notifications."
               avatarCacheBust={avatarCacheBust}
+              viewerUserId={viewerUserId}
+              viewerHasAvatar={viewerHasAvatar}
               emptyMessage={
                 friendsState.friends.length === 0
                   ? "Friend activity will show up here once you are connected with people."

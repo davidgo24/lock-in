@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 import { getSessionUserId } from "@/lib/auth";
 import {
-  deleteMyComment,
-  upsertActivityComment,
+  createActivityComment,
+  deleteActivityComment,
 } from "@/lib/activity-social";
 
 type Ctx = { params: Promise<{ sessionId: string }> };
 
-/** Create or update your single comment on a friend&apos;s session. */
+/** Add a comment (friend) or reply (session owner). */
 export async function POST(req: Request, ctx: Ctx) {
   const userId = await getSessionUserId();
   if (!userId) {
@@ -22,7 +22,7 @@ export async function POST(req: Request, ctx: Ctx) {
   }
   const text = typeof body.body === "string" ? body.body : "";
   try {
-    await upsertActivityComment(userId, sessionId, text);
+    await createActivityComment(userId, sessionId, text);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const code = (e as { code?: string }).code;
@@ -40,14 +40,28 @@ export async function POST(req: Request, ctx: Ctx) {
   }
 }
 
-export async function DELETE(_req: Request, ctx: Ctx) {
+export async function DELETE(req: Request, ctx: Ctx) {
   const userId = await getSessionUserId();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  const { sessionId } = await ctx.params;
+  let commentId: string | null = null;
   try {
-    await deleteMyComment(userId, sessionId);
+    const body = (await req.json()) as { commentId?: unknown };
+    if (typeof body.commentId === "string" && body.commentId.length > 0) {
+      commentId = body.commentId;
+    }
+  } catch {
+    /* empty or invalid body */
+  }
+  if (!commentId) {
+    return NextResponse.json(
+      { error: "commentId required in JSON body" },
+      { status: 400 },
+    );
+  }
+  try {
+    await deleteActivityComment(userId, commentId);
     return NextResponse.json({ ok: true });
   } catch (e) {
     const code = (e as { code?: string }).code;

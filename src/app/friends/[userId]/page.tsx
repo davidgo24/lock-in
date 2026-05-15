@@ -54,6 +54,13 @@ export default async function FriendProfilePage({ params }: Props) {
         : friend.activeFocusProject.name
       : null;
 
+  const viewer = await prisma.user.findUnique({
+    where: { id: viewerId },
+    select: { avatarBytes: true },
+  });
+  const viewerHasAvatar =
+    viewer?.avatarBytes != null && viewer.avatarBytes.length > 0;
+
   return (
     <div className="relative mx-auto min-h-dvh max-w-lg px-4 py-8 pb-[max(2rem,env(safe-area-inset-bottom))]">
       <div className="absolute right-3 top-[max(0.75rem,env(safe-area-inset-top))] z-10 sm:right-4 sm:top-4">
@@ -104,8 +111,8 @@ export default async function FriendProfilePage({ params }: Props) {
         <FriendProfileFeed
           entries={entries}
           friendLabel={label}
-          friendUserId={userId}
-          friendHasAvatar={hasAvatar}
+          viewerUserId={viewerId}
+          viewerHasAvatar={viewerHasAvatar}
         />
       </div>
     </div>

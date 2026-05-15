@@ -125,7 +125,7 @@ model ActivityClap {
   @@index([userId])
 }
 
-/// At most one comment per friend per session.
+/// Conversation on a session: friends and the session owner can post multiple comments over time.
 model ActivityComment {
   id        String          @id @default(cuid())
   sessionId String
@@ -136,8 +136,8 @@ model ActivityComment {
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 
-  @@unique([sessionId, userId])
   @@index([sessionId])
+  @@index([sessionId, userId])
 }
 
 model ActivityNotification {

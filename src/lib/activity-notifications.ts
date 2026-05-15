@@ -16,6 +16,8 @@ export type ActivityNotificationItem = {
   actorLabel: string;
   sessionId: string;
   sessionSummarySnippet: string;
+  /** True when this notification is about activity on a session you logged (vs. a thread reply on someone else&apos;s session). */
+  isOnYourSession: boolean;
 };
 
 function snippet(text: string, max = 80): string {
@@ -42,8 +44,18 @@ export async function listNotificationsForUser(
         readAt: true,
         createdAt: true,
         sessionId: true,
+        recipientId: true,
         actor: { select: actorSelect },
-        session: { select: { summary: true } },
+        session: {
+          select: {
+            summary: true,
+            project: {
+              select: {
+                userId: true,
+              },
+            },
+          },
+        },
       },
     }),
     prisma.activityNotification.count({
@@ -59,6 +71,7 @@ export async function listNotificationsForUser(
     actorLabel: publicLabel(r.actor),
     sessionId: r.sessionId,
     sessionSummarySnippet: snippet(r.session.summary),
+    isOnYourSession: r.recipientId === r.session.project.userId,
   }));
 
   return { items, unreadCount };

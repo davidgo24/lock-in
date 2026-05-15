@@ -6,6 +6,7 @@ import { normalizeReactionEmoji } from "@/lib/emoji-reaction";
 const COMMENT_MAX = 500;
 
 export type ActivitySocialComment = {
+  id: string;
   authorLabel: string;
   authorUserId: string;
   authorHasAvatar: boolean;
@@ -23,6 +24,7 @@ export type ActivitySocialPayload = {
   /** Per-emoji counts for this session. */
   reactionBreakdown: ReactionBreakdownRow[];
   comments: ActivitySocialComment[];
+  /** Text of your most recent comment on this session (for composer placeholder). */
   myComment: string | null;
 };
 
@@ -76,6 +78,28 @@ export function validateCommentBody(raw: string): string | null {
   if (t.length < 1) return "Comment cannot be empty.";
   if (t.length > COMMENT_MAX) return `Comment must be at most ${COMMENT_MAX} characters.`;
   return null;
+}
+
+export async function assertCanPostComment(
+  viewerId: string,
+  sessionId: string,
+): Promise<{ ownerId: string; isOwner: boolean }> {
+  const ownerId = await getSessionOwnerId(sessionId);
+  if (!ownerId) {
+    const err = new Error("NOT_FOUND") as Error & { code: string };
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  if (viewerId === ownerId) {
+    return { ownerId, isOwner: true };
+  }
+  const ok = await areFriends(viewerId, ownerId);
+  if (!ok) {
+    const err = new Error("FORBIDDEN") as Error & { code: string };
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+  return { ownerId, isOwner: false };
 }
 
 export async function notifyActivityEvent(opts: {
@@ -164,11 +188,11 @@ export async function setReactionEmoji(
   };
 }
 
-export async function upsertActivityComment(
+export async function createActivityComment(
   viewerId: string,
   sessionId: string,
   body: string,
-): Promise<{ isNew: boolean }> {
+): Promise<void> {
   const errMsg = validateCommentBody(body);
   if (errMsg) {
     const err = new Error(errMsg) as Error & { code: string };
@@ -176,38 +200,58 @@ export async function upsertActivityComment(
     throw err;
   }
   const normalized = normalizeCommentBody(body);
-  const { ownerId } = await assertFriendCanReact(viewerId, sessionId);
+  const { ownerId, isOwner } = await assertCanPostComment(viewerId, sessionId);
 
-  const prior = await prisma.activityComment.findUnique({
-    where: { sessionId_userId: { sessionId, userId: viewerId } },
+  await prisma.activityComment.create({
+    data: { sessionId, userId: viewerId, body: normalized },
   });
 
-  await prisma.activityComment.upsert({
-    where: { sessionId_userId: { sessionId, userId: viewerId } },
-    create: { sessionId, userId: viewerId, body: normalized },
-    update: { body: normalized },
-  });
-
-  if (!prior) {
+  if (!isOwner) {
     await notifyActivityEvent({
       recipientId: ownerId,
       actorId: viewerId,
       sessionId,
       type: "COMMENT",
     });
+    return;
   }
 
-  return { isNew: !prior };
+  const participants = await prisma.activityComment.findMany({
+    where: { sessionId, userId: { not: ownerId } },
+    select: { userId: true },
+    distinct: ["userId"],
+  });
+  for (const { userId } of participants) {
+    if (userId === viewerId) continue;
+    await notifyActivityEvent({
+      recipientId: userId,
+      actorId: viewerId,
+      sessionId,
+      type: "COMMENT",
+    });
+  }
 }
 
-export async function deleteMyComment(
+export async function deleteActivityComment(
   viewerId: string,
-  sessionId: string,
+  commentId: string,
 ): Promise<void> {
-  await assertFriendCanReact(viewerId, sessionId);
-  await prisma.activityComment.deleteMany({
-    where: { sessionId, userId: viewerId },
+  const row = await prisma.activityComment.findUnique({
+    where: { id: commentId },
+    select: { userId: true, sessionId: true },
   });
+  if (!row) {
+    const err = new Error("NOT_FOUND") as Error & { code: string };
+    err.code = "NOT_FOUND";
+    throw err;
+  }
+  if (row.userId !== viewerId) {
+    const err = new Error("FORBIDDEN") as Error & { code: string };
+    err.code = "FORBIDDEN";
+    throw err;
+  }
+  await assertCanPostComment(viewerId, row.sessionId);
+  await prisma.activityComment.delete({ where: { id: commentId } });
 }
 
 const commentUserSelect = {
@@ -218,6 +262,7 @@ const commentUserSelect = {
 } as const;
 
 type CommentWithUser = {
+  id: string;
   body: string;
   createdAt: Date;
   user: {
@@ -230,6 +275,7 @@ type CommentWithUser = {
 
 function mapComment(c: CommentWithUser): ActivitySocialComment {
   return {
+    id: c.id,
     authorLabel: publicLabel(c.user),
     authorUserId: c.user.id,
     authorHasAvatar:
@@ -238,6 +284,8 @@ function mapComment(c: CommentWithUser): ActivitySocialComment {
     createdAt: c.createdAt.toISOString(),
   };
 }
+
+const MAX_COMMENTS_SHOWN_PER_SESSION = 50;
 
 /** Batch-load social state for many sessions (single viewer). */
 export async function getSocialBySessionIds(
@@ -255,6 +303,7 @@ export async function getSocialBySessionIds(
     prisma.activityComment.findMany({
       where: { sessionId: { in: sessionIds } },
       select: {
+        id: true,
         sessionId: true,
         body: true,
         createdAt: true,
@@ -264,7 +313,8 @@ export async function getSocialBySessionIds(
     }),
     prisma.activityComment.findMany({
       where: { sessionId: { in: sessionIds }, userId: viewerId },
-      select: { sessionId: true, body: true },
+      select: { sessionId: true, body: true, createdAt: true },
+      orderBy: { createdAt: "desc" },
     }),
   ]);
 
@@ -290,16 +340,28 @@ export async function getSocialBySessionIds(
   const myClapSet = new Set(
     Object.entries(myReactionMap).map(([sessionId]) => sessionId),
   );
-  const myCommentMap = Object.fromEntries(
-    myComments.map((c) => [c.sessionId, c.body]),
-  );
+  const myCommentMap: Record<string, string> = {};
+  for (const c of myComments) {
+    if (myCommentMap[c.sessionId] === undefined) {
+      myCommentMap[c.sessionId] = c.body;
+    }
+  }
 
   const commentsBySession = new Map<string, ActivitySocialComment[]>();
   for (const sid of sessionIds) commentsBySession.set(sid, []);
   for (const row of allComments) {
     const list = commentsBySession.get(row.sessionId);
     if (!list) continue;
-    if (list.length < 8) list.push(mapComment(row));
+    list.push(mapComment(row));
+  }
+  for (const sid of sessionIds) {
+    const list = commentsBySession.get(sid);
+    if (list && list.length > MAX_COMMENTS_SHOWN_PER_SESSION) {
+      commentsBySession.set(
+        sid,
+        list.slice(-MAX_COMMENTS_SHOWN_PER_SESSION),
+      );
+    }
   }
 
   for (const sid of sessionIds) {

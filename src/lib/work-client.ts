@@ -8,6 +8,8 @@ export type ActivityNotificationRow = {
   actorLabel: string;
   sessionId: string;
   sessionSummarySnippet: string;
+  /** For COMMENT: distinguishes friend-on-your-session vs. thread reply on their session. */
+  isOnYourSession: boolean;
 };
 
 export type ApiWorkEntry = {
@@ -26,6 +28,7 @@ export type ApiWorkEntry = {
     myReactionEmoji: string | null;
     reactionBreakdown: { emoji: string; count: number }[];
     comments: {
+      id: string;
       authorLabel: string;
       authorUserId: string;
       authorHasAvatar: boolean;

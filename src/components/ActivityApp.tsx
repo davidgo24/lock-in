@@ -31,6 +31,7 @@ import { SaveSessionScreens } from "@/components/activity-app/SaveSessionScreens
 import { DashboardHeader } from "@/components/activity-app/DashboardHeader";
 import { CommunitySidebar } from "@/components/activity-app/CommunitySidebar";
 import { FriendsInFocusStrip } from "@/components/activity-app/FriendsInFocusStrip";
+import { MobileTabBar } from "@/components/activity-app/MobileTabBar";
 import { DashboardSectionNav } from "@/components/activity-app/dashboard/DashboardSectionNav";
 import { FocusAreasSidebar } from "@/components/activity-app/dashboard/FocusAreasSidebar";
 import { FocusTimerPanel } from "@/components/activity-app/dashboard/FocusTimerPanel";
@@ -159,6 +160,9 @@ export function ActivityApp({
     useState<FriendsStatePayload>(initialFriendsState);
   const [sidebarTab, setSidebarTab] = useState<"you" | "community">(() =>
     initialFriendsState.incoming.length > 0 ? "community" : "you",
+  );
+  const [mobilePrimaryTab, setMobilePrimaryTab] = useState<"focus" | "social">(
+    "focus",
   );
   const [viewerHasAvatar, setViewerHasAvatar] = useState(initialViewerHasAvatar);
   const [avatarCacheBust, setAvatarCacheBust] = useState(0);
@@ -350,12 +354,16 @@ export function ActivityApp({
     }
   }
 
-  /* Open Community when `?tab=community` — syncs URL (external) → UI. */
+  /* `?tab=community` / `?tab=social` — sync URL (notifications, profile nav) → UI; strip tab from bar. */
   useLayoutEffect(() => {
     const tab = searchParams.get("tab");
     if (tab === "community") {
       // eslint-disable-next-line react-hooks/set-state-in-effect -- `tab` query param is external navigation state
       setSidebarTab("community");
+      setMobilePrimaryTab("social");
+    }
+    if (tab === "social") {
+      setMobilePrimaryTab("social");
     }
     if (typeof window !== "undefined" && tab) {
       const url = new URL(window.location.href);
@@ -1652,7 +1660,7 @@ export function ActivityApp({
   }
 
   return (
-    <div className="mx-auto box-border min-h-svh w-full min-w-0 max-w-[1400px] px-3 py-5 sm:px-5 sm:py-7 pb-[max(1rem,env(safe-area-inset-bottom))]">
+    <div className="mx-auto box-border min-h-svh w-full min-w-0 max-w-[1400px] px-3 py-5 pb-[calc(4.5rem+max(0.5rem,env(safe-area-inset-bottom)))] sm:px-5 sm:py-7 xl:pb-[max(1rem,env(safe-area-inset-bottom))]">
       <DashboardHeader
         appName={appName}
         stats={stats}
@@ -1690,26 +1698,45 @@ export function ActivityApp({
         avatarCacheBust={avatarCacheBust}
       />
 
-      <DashboardSectionNav />
+      {mobilePrimaryTab === "focus" ? (
+        <DashboardSectionNav
+          onCommunityNavigate={() => setMobilePrimaryTab("social")}
+        />
+      ) : null}
 
       <div className="mt-4 flex flex-col gap-8 xl:grid xl:grid-cols-[260px_minmax(0,1fr)_minmax(0,300px)] xl:items-start xl:gap-8">
-        <FocusAreasSidebar
-          projects={projects}
-          archivedProjects={archivedProjects}
-          selectedId={selectedId}
-          onSelectProject={setSelectedId}
-          arming={arming}
-          running={running}
-          newProjectName={newProjectName}
-          onNewProjectNameChange={setNewProjectName}
-          addingProject={addingProject}
-          onAddingProjectChange={setAddingProject}
-          onAddProject={() => void addProject()}
-          onArchiveFocusArea={(id) => void archiveFocusArea(id)}
-          onRestoreArchived={(id) => void restoreArchivedProject(id)}
-          pendingArchiveId={pendingArchiveId}
-        />
+        <div
+          className={
+            mobilePrimaryTab === "social"
+              ? "hidden xl:contents"
+              : "xl:contents"
+          }
+        >
+          <FocusAreasSidebar
+            projects={projects}
+            archivedProjects={archivedProjects}
+            selectedId={selectedId}
+            onSelectProject={setSelectedId}
+            arming={arming}
+            running={running}
+            newProjectName={newProjectName}
+            onNewProjectNameChange={setNewProjectName}
+            addingProject={addingProject}
+            onAddingProjectChange={setAddingProject}
+            onAddProject={() => void addProject()}
+            onArchiveFocusArea={(id) => void archiveFocusArea(id)}
+            onRestoreArchived={(id) => void restoreArchivedProject(id)}
+            pendingArchiveId={pendingArchiveId}
+          />
+        </div>
 
+        <div
+          className={
+            mobilePrimaryTab === "social"
+              ? "hidden xl:contents"
+              : "xl:contents"
+          }
+        >
         <main className="order-1 flex min-w-0 flex-col gap-6 xl:order-2">
           <FocusTimerPanel
             selectedProject={selectedProject}
@@ -1766,20 +1793,33 @@ export function ActivityApp({
             }
           />
         </main>
+        </div>
 
-        <CommunitySidebar
-          displayName={displayName}
-          viewerUserId={viewerUserId}
-          viewerHasAvatar={viewerHasAvatar}
-          avatarCacheBust={avatarCacheBust}
-          workEntries={workEntries}
-          friendFeed={friendFeed}
-          friendsState={friendsState}
-          sidebarTab={sidebarTab}
-          onSidebarTab={setSidebarTab}
-          refreshEntryFeeds={refreshEntryFeeds}
-        />
+        <div
+          className={
+            mobilePrimaryTab === "focus"
+              ? "max-xl:hidden xl:contents"
+              : "xl:contents"
+          }
+        >
+          <CommunitySidebar
+            displayName={displayName}
+            viewerUserId={viewerUserId}
+            viewerHasAvatar={viewerHasAvatar}
+            avatarCacheBust={avatarCacheBust}
+            workEntries={workEntries}
+            friendFeed={friendFeed}
+            friendsState={friendsState}
+            sidebarTab={sidebarTab}
+            onSidebarTab={setSidebarTab}
+            refreshEntryFeeds={refreshEntryFeeds}
+          />
+        </div>
       </div>
+      <MobileTabBar
+        dashboardTab={mobilePrimaryTab}
+        onDashboardTabChange={setMobilePrimaryTab}
+      />
       <TimerBreakOffer
         open={breakOfferOpen}
         breakMinutes={breakDraftMinutes}

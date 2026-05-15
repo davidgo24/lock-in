@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
-import { ChevronDown, ChevronUp } from "lucide-react";
+import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { ChevronDown, ChevronUp, MessageCircle, Reply } from "lucide-react";
 import {
   REACTION_QUICK_PICKS,
   normalizeReactionEmoji,
@@ -13,6 +13,7 @@ export type ActivitySocial = {
   myReactionEmoji: string | null;
   reactionBreakdown: { emoji: string; count: number }[];
   comments: {
+    id: string;
     authorLabel: string;
     authorUserId: string;
     authorHasAvatar: boolean;
@@ -111,9 +112,63 @@ function defaultSocial(): ActivitySocial {
   };
 }
 
+const bubbleMessageClass =
+  "flex gap-2.5 rounded-xl border border-[var(--app-border)]/70 bg-[var(--background)]/70 px-2.5 py-2.5 text-xs leading-snug shadow-sm";
+
+/** Framed thread: clear header, messages, anchored reply area. */
+function ConversationSection({
+  commentCount,
+  emptyHint,
+  children,
+  composer,
+}: {
+  commentCount: number;
+  emptyHint: string;
+  children: ReactNode;
+  composer: ReactNode;
+}) {
+  return (
+    <div className="mt-4 overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)]/40 shadow-[0_1px_0_rgba(0,0,0,0.04)] dark:shadow-[0_1px_0_rgba(255,255,255,0.04)]">
+      <div className="flex items-center gap-2 border-b border-[var(--app-border)]/80 bg-[var(--app-accent)]/[0.08] px-3 py-2.5 sm:px-4">
+        <MessageCircle
+          className="h-4 w-4 shrink-0 text-[var(--app-accent)]"
+          strokeWidth={2}
+          aria-hidden
+        />
+        <span className="text-[13px] font-semibold text-[var(--foreground)]">
+          Conversation
+        </span>
+        {commentCount > 0 ? (
+          <span className="ml-auto rounded-full border border-[var(--app-border)] bg-[var(--background)]/90 px-2 py-0.5 text-[10px] font-bold tabular-nums text-[var(--app-muted)]">
+            {commentCount}{" "}
+            {commentCount === 1 ? "message" : "messages"}
+          </span>
+        ) : null}
+      </div>
+      <div className="px-2 py-3 sm:px-3">
+        {commentCount > 0 ? (
+          children
+        ) : (
+          <p className="px-1 py-2 text-center text-xs leading-relaxed text-[var(--app-muted)]">
+            {emptyHint}
+          </p>
+        )}
+      </div>
+      <div className="border-t border-[var(--app-border)] bg-[var(--background)]/35 px-2 py-3 sm:px-3 sm:py-3.5">
+        <p className="mb-2 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-muted)]">
+          <Reply className="h-3 w-3" aria-hidden />
+          Reply
+        </p>
+        {composer}
+      </div>
+    </div>
+  );
+}
+
 type FriendEntryProps = {
   e: WorkEntryRow;
   displayName: string;
+  viewerUserId: string;
   onAfterMutation: () => void | Promise<void>;
   avatarCacheBust?: number;
 };
@@ -121,26 +176,27 @@ type FriendEntryProps = {
 function FriendEntryRow({
   e,
   displayName,
+  viewerUserId,
   onAfterMutation,
   avatarCacheBust = 0,
 }: FriendEntryProps) {
   const social = e.social ?? defaultSocial();
   const label = (e.authorLabel ?? displayName).trim();
   const initial = label.charAt(0).toUpperCase() || "?";
-  const [commentDraft, setCommentDraft] = useState(social.myComment ?? "");
+  const [commentDraft, setCommentDraft] = useState("");
   const [busy, setBusy] = useState<"clap" | "comment" | "delete" | null>(null);
   /** Quick-pick grid + custom emoji — hidden until user opens. */
   const [reactionPickerOpen, setReactionPickerOpen] = useState(false);
   /** Emoji keyboard — type or paste one emoji, then Add. */
   const [customReactionOpen, setCustomReactionOpen] = useState(false);
   const [customReactionDraft, setCustomReactionDraft] = useState("");
-  /** Keep the session note editor tucked away so the main caption + thread stay primary. */
+  /** Reply composer — multiple notes per thread are allowed. */
   const [noteEditorOpen, setNoteEditorOpen] = useState(false);
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- sync draft when server refetches social.myComment
-    setCommentDraft(social.myComment ?? "");
-  }, [social.myComment]);
+    if (noteEditorOpen) return;
+    setCommentDraft("");
+  }, [social.comments, noteEditorOpen]);
 
   const runRefresh = useCallback(async () => {
     await onAfterMutation();
@@ -183,6 +239,7 @@ function FriendEntryRow({
         body: JSON.stringify({ body: t }),
       });
       if (!res.ok) return;
+      setCommentDraft("");
       await runRefresh();
       setNoteEditorOpen(false);
     } finally {
@@ -190,12 +247,14 @@ function FriendEntryRow({
     }
   }
 
-  async function onDeleteComment() {
+  async function onDeleteComment(commentId: string) {
     if (busy) return;
     setBusy("delete");
     try {
       const res = await fetch(`/api/activity/${e.id}/comment`, {
         method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commentId }),
       });
       if (!res.ok) return;
       setCommentDraft("");
@@ -207,17 +266,12 @@ function FriendEntryRow({
   }
 
   function closeNoteEditor() {
-    setCommentDraft(social.myComment ?? "");
+    setCommentDraft("");
     setNoteEditorOpen(false);
   }
 
-  const myNotePreview =
-    social.myComment && social.myComment.length > 120
-      ? `${social.myComment.slice(0, 117)}…`
-      : social.myComment;
-
   return (
-    <li className="rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 p-4">
+    <li className="rounded-2xl border border-[var(--app-border)] bg-[var(--background)]/50 p-4 shadow-sm">
       <div className="flex gap-3">
         <SessionAvatar
           userId={e.authorUserId}
@@ -380,22 +434,64 @@ function FriendEntryRow({
             ) : null}
           </div>
 
-          <div className="mt-3 flex flex-wrap items-center gap-2">
-            {social.comments.length > 0 ? (
-              <span className="text-xs text-[var(--app-muted)]">
-                {social.comments.length}{" "}
-                {social.comments.length === 1 ? "note" : "notes"}
-              </span>
-            ) : null}
-          </div>
-
-          {social.comments.length > 0 ? (
-            <ul className="mt-2 space-y-2 rounded-lg border border-[var(--app-border)] bg-[var(--background)]/40 p-2">
-              {social.comments.map((c, i) => (
-                <li
-                  key={`${e.id}-c-${i}`}
-                  className="flex gap-2 text-xs leading-snug"
+          <ConversationSection
+            commentCount={social.comments.length}
+            emptyHint="No messages yet — be the first to cheer them on."
+            composer={
+              !noteEditorOpen ? (
+                <button
+                  type="button"
+                  disabled={busy !== null}
+                  onClick={() => setNoteEditorOpen(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] px-4 py-3 text-sm font-medium text-[var(--foreground)] shadow-sm transition hover:bg-[var(--background)]/80 active:scale-[0.99] disabled:opacity-50 sm:w-auto sm:justify-start"
                 >
+                  <Reply className="h-4 w-4 shrink-0 text-[var(--app-accent)]" />
+                  {social.comments.some((c) => c.authorUserId === viewerUserId)
+                    ? "Add another message"
+                    : "Write a message"}
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label
+                      id={`friend-note-label-${e.id}`}
+                      className="text-[11px] font-medium text-[var(--app-muted)]"
+                    >
+                      Visible to everyone on this thread
+                    </label>
+                    <button
+                      type="button"
+                      disabled={busy !== null}
+                      onClick={closeNoteEditor}
+                      className="text-[11px] font-medium text-[var(--app-accent)] hover:underline disabled:opacity-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  <textarea
+                    aria-labelledby={`friend-note-label-${e.id}`}
+                    className="min-h-[88px] w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                    placeholder="Say something kind…"
+                    maxLength={500}
+                    value={commentDraft}
+                    onChange={(ev) => setCommentDraft(ev.target.value)}
+                    disabled={busy !== null}
+                  />
+                  <button
+                    type="button"
+                    disabled={busy !== null || commentDraft.trim().length < 1}
+                    onClick={() => void onSaveComment()}
+                    className="min-h-10 w-full rounded-xl bg-[var(--app-accent)] px-4 text-sm font-semibold text-white shadow-sm disabled:opacity-50 sm:w-auto"
+                  >
+                    {busy === "comment" ? "Posting…" : "Send"}
+                  </button>
+                </div>
+              )
+            }
+          >
+            <ul className="space-y-2">
+              {social.comments.map((c) => (
+                <li key={c.id} className={bubbleMessageClass}>
                   <SessionAvatar
                     userId={c.authorUserId}
                     hasAvatar={c.authorHasAvatar}
@@ -406,114 +502,276 @@ function FriendEntryRow({
                     size="sm"
                   />
                   <div className="min-w-0 flex-1 pt-0.5">
-                    <span className="font-medium text-[var(--foreground)]/90">
-                      {c.authorLabel}
-                    </span>
-                    <span className="text-[var(--app-muted)]">
-                      {" "}
-                      ·{" "}
-                      <span className="tabular-nums">
-                        {formatRelativeTime(c.createdAt)}
+                    <div className="flex flex-wrap items-start justify-between gap-1">
+                      <span>
+                        <span className="font-semibold text-[var(--foreground)]/95">
+                          {c.authorLabel}
+                        </span>
+                        <span className="text-[var(--app-muted)]">
+                          {" "}
+                          ·{" "}
+                          <span className="tabular-nums">
+                            {formatRelativeTime(c.createdAt)}
+                          </span>
+                        </span>
                       </span>
-                    </span>
-                    <p className="mt-0.5 text-[var(--foreground)]/80">
+                      {c.authorUserId === viewerUserId ? (
+                        <button
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => void onDeleteComment(c.id)}
+                          className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-muted)] hover:bg-red-500/10 hover:text-red-600 disabled:opacity-50 dark:hover:text-red-400"
+                        >
+                          {busy === "delete" ? "…" : "Delete"}
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-[var(--foreground)]/85">
                       {c.body}
                     </p>
                   </div>
                 </li>
               ))}
             </ul>
-          ) : null}
+          </ConversationSection>
 
-          <div className="mt-3 border-t border-[var(--app-border)] pt-3">
-            {!noteEditorOpen ? (
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                {social.myComment ? (
+          <p className="mt-2 text-right text-xs text-[var(--app-muted)]">
+            {formatRelativeTime(e.createdAt)}
+          </p>
+        </div>
+      </div>
+    </li>
+  );
+}
+
+type YourEntryProps = {
+  e: WorkEntryRow;
+  displayName: string;
+  viewerUserId: string;
+  viewerHasAvatar?: boolean;
+  avatarCacheBust: number;
+  onAfterMutation: () => void | Promise<void>;
+};
+
+/** Your sessions (or a friend&apos;s profile on your view): read thread + reply as session owner or viewer. */
+function YourActivityEntryRow({
+  e,
+  displayName,
+  viewerUserId,
+  viewerHasAvatar,
+  avatarCacheBust,
+  onAfterMutation,
+}: YourEntryProps) {
+  const social = e.social ?? defaultSocial();
+  const label = (e.authorLabel ?? displayName).trim();
+  const cardUserId = e.authorUserId ?? viewerUserId;
+  const cardHasAvatar = e.authorHasAvatar ?? viewerHasAvatar;
+  const initial = label.charAt(0).toUpperCase() || "?";
+  const [commentDraft, setCommentDraft] = useState("");
+  const [busy, setBusy] = useState<"comment" | "delete" | null>(null);
+  const [composerOpen, setComposerOpen] = useState(false);
+
+  useEffect(() => {
+    if (composerOpen) return;
+    setCommentDraft("");
+  }, [social.comments, composerOpen]);
+
+  const runRefresh = useCallback(async () => {
+    await onAfterMutation();
+  }, [onAfterMutation]);
+
+  async function onSaveComment() {
+    if (busy || !viewerUserId) return;
+    const t = commentDraft.trim();
+    if (t.length < 1) return;
+    setBusy("comment");
+    try {
+      const res = await fetch(`/api/activity/${e.id}/comment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: t }),
+      });
+      if (!res.ok) return;
+      setCommentDraft("");
+      setComposerOpen(false);
+      await runRefresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function onDeleteComment(commentId: string) {
+    if (busy) return;
+    setBusy("delete");
+    try {
+      const res = await fetch(`/api/activity/${e.id}/comment`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ commentId }),
+      });
+      if (!res.ok) return;
+      await runRefresh();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <li className="rounded-2xl border border-[var(--app-border)] bg-[var(--background)]/50 p-4 shadow-sm">
+      <div className="flex gap-3">
+        <SessionAvatar
+          userId={cardUserId}
+          hasAvatar={cardHasAvatar}
+          initial={initial}
+          cacheBust={avatarCacheBust}
+        />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-start justify-between gap-2">
+            <div>
+              <p className="font-medium text-[var(--foreground)]">
+                {label || displayName}
+              </p>
+              <p className="text-xs text-[var(--app-muted)]">
+                {formatWorkedFor(e.durationSec)}
+                <span className="opacity-50"> · </span>
+                <span className="text-[var(--foreground)]/70">
+                  {e.project.isMisc ? "General" : e.project.name}
+                </span>
+              </p>
+            </div>
+          </div>
+          <p className="mt-3 break-words whitespace-pre-wrap text-sm leading-relaxed text-[var(--foreground)]/85">
+            {e.summary}
+          </p>
+          {social.reactionBreakdown.length > 0 || social.clapCount > 0 ? (
+            <div className="mt-3 border-t border-[var(--app-border)] pt-3">
+              <p className="text-xs text-[var(--app-muted)]">
+                {social.reactionBreakdown.length > 0 ? (
                   <>
-                    <p className="min-w-0 flex-1 text-xs leading-snug text-[var(--foreground)]/85">
-                      <span className="font-medium text-[var(--foreground)]/90">
-                        Your note
+                    {social.reactionBreakdown.map(({ emoji, count }) => (
+                      <span
+                        key={emoji}
+                        className="mr-2 inline-flex items-center gap-0.5 tabular-nums"
+                      >
+                        <span aria-hidden>{emoji}</span>
+                        {count}
                       </span>
-                      <span className="text-[var(--app-muted)]"> · </span>
-                      <span className="whitespace-pre-wrap break-words">
-                        {myNotePreview}
-                      </span>
-                    </p>
+                    ))}
+                    <span className="mr-2 opacity-40">·</span>
+                  </>
+                ) : null}
+                {social.clapCount > 0 ? (
+                  <span>
+                    {social.clapCount}{" "}
+                    {social.clapCount === 1 ? "reaction" : "reactions"}
+                  </span>
+                ) : null}
+              </p>
+            </div>
+          ) : null}
+          <ConversationSection
+            commentCount={social.comments.length}
+            emptyHint="When friends leave a note, it shows up here. Your replies notify everyone in the thread."
+            composer={
+              !composerOpen ? (
+                <button
+                  type="button"
+                  disabled={busy !== null || !viewerUserId}
+                  onClick={() => setComposerOpen(true)}
+                  className="flex w-full items-center justify-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] px-4 py-3 text-sm font-medium text-[var(--foreground)] shadow-sm transition hover:bg-[var(--background)]/80 active:scale-[0.99] disabled:opacity-50 sm:w-auto sm:justify-start"
+                >
+                  <Reply className="h-4 w-4 shrink-0 text-[var(--app-accent)]" />
+                  {social.comments.length > 0
+                    ? "Write a reply"
+                    : "Start the thread"}
+                </button>
+              ) : (
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <label
+                      id={`owner-note-label-${e.id}`}
+                      className="text-[11px] font-medium text-[var(--app-muted)]"
+                    >
+                      Friends in this thread are notified when you post
+                    </label>
                     <button
                       type="button"
                       disabled={busy !== null}
-                      onClick={() => setNoteEditorOpen(true)}
-                      className="shrink-0 rounded-lg border border-[var(--app-border)] bg-[var(--app-surface-card)] px-2.5 py-1.5 text-xs font-medium text-[var(--foreground)] disabled:opacity-50"
+                      onClick={() => {
+                        setComposerOpen(false);
+                        setCommentDraft("");
+                      }}
+                      className="text-[11px] font-medium text-[var(--app-accent)] hover:underline disabled:opacity-50"
                     >
-                      Edit
+                      Cancel
                     </button>
-                  </>
-                ) : (
-                  <button
-                    type="button"
+                  </div>
+                  <textarea
+                    aria-labelledby={`owner-note-label-${e.id}`}
+                    className="min-h-[88px] w-full rounded-xl border border-[var(--app-border)] bg-[var(--background)] px-3 py-2.5 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
+                    placeholder="Write a reply…"
+                    maxLength={500}
+                    value={commentDraft}
+                    onChange={(ev) => setCommentDraft(ev.target.value)}
                     disabled={busy !== null}
-                    onClick={() => setNoteEditorOpen(true)}
-                    className="rounded-lg border border-dashed border-[var(--app-border)] bg-[var(--background)]/40 px-3 py-2 text-xs font-medium text-[var(--app-muted)] hover:text-[var(--foreground)] disabled:opacity-50"
-                  >
-                    Add a note on this session
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="space-y-2">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <label
-                    id={`friend-note-label-${e.id}`}
-                    className="text-[10px] font-medium uppercase tracking-wide text-[var(--app-muted)]"
-                  >
-                    Your note (one per post — private to this thread)
-                  </label>
-                  <button
-                    type="button"
-                    disabled={busy !== null}
-                    onClick={closeNoteEditor}
-                    className="text-[10px] font-medium uppercase tracking-wide text-[var(--app-accent)] hover:underline disabled:opacity-50"
-                  >
-                    Close
-                  </button>
-                </div>
-                <textarea
-                  aria-labelledby={`friend-note-label-${e.id}`}
-                  className="min-h-[72px] w-full rounded-lg border border-[var(--app-border)] bg-[var(--background)] px-2 py-2 text-sm text-[var(--foreground)] outline-none ring-[var(--app-accent)]/30 focus:ring-2"
-                  placeholder="Say something kind…"
-                  maxLength={500}
-                  value={commentDraft}
-                  onChange={(ev) => setCommentDraft(ev.target.value)}
-                  disabled={busy !== null}
-                />
-                <div className="flex flex-wrap gap-2">
+                  />
                   <button
                     type="button"
                     disabled={busy !== null || commentDraft.trim().length < 1}
                     onClick={() => void onSaveComment()}
-                    className="min-h-9 rounded-lg bg-[var(--app-accent)] px-3 py-1.5 text-xs font-medium text-white disabled:opacity-50"
+                    className="min-h-10 w-full rounded-xl bg-[var(--app-accent)] px-4 text-sm font-semibold text-white shadow-sm disabled:opacity-50 sm:w-auto"
                   >
-                    {busy === "comment"
-                      ? "Saving…"
-                      : social.myComment
-                        ? "Update note"
-                        : "Post note"}
+                    {busy === "comment" ? "Posting…" : "Send reply"}
                   </button>
-                  {social.myComment ? (
-                    <button
-                      type="button"
-                      disabled={busy !== null}
-                      onClick={() => void onDeleteComment()}
-                      className="min-h-9 rounded-lg border border-[var(--app-border)] px-3 py-1.5 text-xs text-[var(--app-muted)] disabled:opacity-50"
-                    >
-                      {busy === "delete" ? "…" : "Remove my note"}
-                    </button>
-                  ) : null}
                 </div>
-              </div>
-            )}
-          </div>
-
+              )
+            }
+          >
+            <ul className="space-y-2">
+              {social.comments.map((c) => (
+                <li key={c.id} className={bubbleMessageClass}>
+                  <SessionAvatar
+                    userId={c.authorUserId}
+                    hasAvatar={c.authorHasAvatar}
+                    initial={
+                      c.authorLabel.trim().charAt(0).toUpperCase() || "?"
+                    }
+                    cacheBust={avatarCacheBust}
+                    size="sm"
+                  />
+                  <div className="min-w-0 flex-1 pt-0.5">
+                    <div className="flex flex-wrap items-start justify-between gap-1">
+                      <span>
+                        <span className="font-semibold text-[var(--foreground)]/95">
+                          {c.authorLabel}
+                        </span>
+                        <span className="text-[var(--app-muted)]">
+                          {" "}
+                          ·{" "}
+                          <span className="tabular-nums">
+                            {formatRelativeTime(c.createdAt)}
+                          </span>
+                        </span>
+                      </span>
+                      {c.authorUserId === viewerUserId ? (
+                        <button
+                          type="button"
+                          disabled={busy !== null}
+                          onClick={() => void onDeleteComment(c.id)}
+                          className="shrink-0 rounded-md px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--app-muted)] hover:bg-red-500/10 hover:text-red-600 disabled:opacity-50 dark:hover:text-red-400"
+                        >
+                          {busy === "delete" ? "…" : "Delete"}
+                        </button>
+                      ) : null}
+                    </div>
+                    <p className="mt-1 whitespace-pre-wrap break-words text-[var(--foreground)]/85">
+                      {c.body}
+                    </p>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          </ConversationSection>
           <p className="mt-2 text-right text-xs text-[var(--app-muted)]">
             {formatRelativeTime(e.createdAt)}
           </p>
@@ -572,127 +830,22 @@ export function WorkEntriesFeed({
                   key={e.id}
                   e={e}
                   displayName={displayName}
+                  viewerUserId={viewerUserId ?? ""}
                   onAfterMutation={refresh}
                   avatarCacheBust={avatarCacheBust}
                 />
               );
             }
-            const social = e.social ?? defaultSocial();
-            const label = displayName.trim();
-            const initial = label.charAt(0).toUpperCase() || "?";
-            const hasSocial =
-              social.clapCount > 0 || social.comments.length > 0;
             return (
-              <li
+              <YourActivityEntryRow
                 key={e.id}
-                className="rounded-xl border border-[var(--app-border)] bg-[var(--background)]/50 p-4"
-              >
-                <div className="flex gap-3">
-                  <SessionAvatar
-                    userId={viewerUserId}
-                    hasAvatar={viewerHasAvatar}
-                    initial={initial}
-                    cacheBust={avatarCacheBust}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div>
-                        <p className="font-medium text-[var(--foreground)]">
-                          {displayName}
-                        </p>
-                        <p className="text-xs text-[var(--app-muted)]">
-                          {formatWorkedFor(e.durationSec)}
-                          <span className="opacity-50"> · </span>
-                          <span className="text-[var(--foreground)]/70">
-                            {e.project.isMisc ? "General" : e.project.name}
-                          </span>
-                        </p>
-                      </div>
-                    </div>
-                    <p className="mt-3 break-words whitespace-pre-wrap text-sm leading-relaxed text-[var(--foreground)]/85">
-                      {e.summary}
-                    </p>
-                    {hasSocial ? (
-                      <div className="mt-3 border-t border-[var(--app-border)] pt-3">
-                        <p className="text-xs text-[var(--app-muted)]">
-                          {social.reactionBreakdown.length > 0 ? (
-                            <>
-                              {social.reactionBreakdown.map(
-                                ({ emoji, count }) => (
-                                  <span
-                                    key={emoji}
-                                    className="mr-2 inline-flex items-center gap-0.5 tabular-nums"
-                                  >
-                                    <span aria-hidden>{emoji}</span>
-                                    {count}
-                                  </span>
-                                ),
-                              )}
-                              <span className="mr-2 opacity-40">·</span>
-                            </>
-                          ) : null}
-                          {social.clapCount > 0 ? (
-                            <span>
-                              {social.clapCount}{" "}
-                              {social.clapCount === 1
-                                ? "reaction"
-                                : "reactions"}
-                            </span>
-                          ) : null}
-                          {social.comments.length > 0 ? (
-                            <>
-                              <span className="mx-1 opacity-40">·</span>
-                              {social.comments.length}{" "}
-                              {social.comments.length === 1
-                                ? "friend note"
-                                : "friend notes"}
-                            </>
-                          ) : null}
-                        </p>
-                        {social.comments.length > 0 ? (
-                          <ul className="mt-2 space-y-1.5">
-                            {social.comments.map((c, i) => (
-                              <li
-                                key={`${e.id}-oc-${i}`}
-                                className="flex gap-2 rounded-md bg-[var(--app-surface-card)]/80 px-2 py-1.5 text-xs leading-snug text-[var(--foreground)]/85"
-                              >
-                                <SessionAvatar
-                                  userId={c.authorUserId}
-                                  hasAvatar={c.authorHasAvatar}
-                                  initial={
-                                    c.authorLabel.trim().charAt(0).toUpperCase() ||
-                                    "?"
-                                  }
-                                  cacheBust={avatarCacheBust}
-                                  size="sm"
-                                />
-                                <div className="min-w-0 flex-1 pt-0.5">
-                                  <span className="font-medium">
-                                    {c.authorLabel}
-                                  </span>
-                                  <span className="text-[var(--app-muted)]">
-                                    {" "}
-                                    ·{" "}
-                                    <span className="tabular-nums">
-                                      {formatRelativeTime(c.createdAt)}
-                                    </span>
-                                  </span>
-                                  <p className="mt-0.5 text-[var(--foreground)]/80">
-                                    {c.body}
-                                  </p>
-                                </div>
-                              </li>
-                            ))}
-                          </ul>
-                        ) : null}
-                      </div>
-                    ) : null}
-                    <p className="mt-2 text-right text-xs text-[var(--app-muted)]">
-                      {formatRelativeTime(e.createdAt)}
-                    </p>
-                  </div>
-                </div>
-              </li>
+                e={e}
+                displayName={displayName}
+                viewerUserId={viewerUserId ?? ""}
+                viewerHasAvatar={viewerHasAvatar}
+                avatarCacheBust={avatarCacheBust}
+                onAfterMutation={refresh}
+              />
             );
           })}
         </ul>

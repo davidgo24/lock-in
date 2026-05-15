@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import {
   WorkEntriesFeed,
   type WorkEntryRow,
@@ -8,14 +9,15 @@ import {
 export function FriendProfileFeed({
   entries,
   friendLabel,
-  friendUserId,
-  friendHasAvatar,
+  viewerUserId,
+  viewerHasAvatar,
 }: {
   entries: WorkEntryRow[];
   friendLabel: string;
-  friendUserId: string;
-  friendHasAvatar: boolean;
+  viewerUserId: string;
+  viewerHasAvatar: boolean;
 }) {
+  const router = useRouter();
   return (
     <WorkEntriesFeed
       entries={entries}
@@ -24,8 +26,9 @@ export function FriendProfileFeed({
       title="Their sessions"
       subtitle="Logged focus blocks — same entries you see mixed into the friend feed."
       emptyMessage="No sessions logged yet."
-      viewerUserId={friendUserId}
-      viewerHasAvatar={friendHasAvatar}
+      viewerUserId={viewerUserId}
+      viewerHasAvatar={viewerHasAvatar}
+      onRefresh={() => router.refresh()}
     />
   );
 }

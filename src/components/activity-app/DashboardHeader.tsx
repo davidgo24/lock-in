@@ -2,7 +2,7 @@
 
 import type { RefObject } from "react";
 import Link from "next/link";
-import { Bell, Flame, LogOut, Trophy, User, Users } from "lucide-react";
+import { Bell, Flame, LogOut, MessageCircle, Sparkles, Trophy, User, Users } from "lucide-react";
 import { hapticLight } from "@/lib/haptics";
 import { ThemeToggle } from "@/components/ThemeToggle";
 import type { StatsBundle } from "@/lib/stats";
@@ -82,33 +82,56 @@ export function DashboardHeader({
           </button>
           {notifOpen ? (
             <div
-              className="fixed inset-x-3 top-[max(3.5rem,env(safe-area-inset-top))] z-[100] max-h-[min(70dvh,28rem)] overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-surface-card)] shadow-xl shadow-black/25 sm:absolute sm:inset-x-auto sm:right-0 sm:left-auto sm:top-full sm:z-50 sm:mt-2 sm:w-[min(20rem,calc(100vw-2rem))] sm:max-h-80"
+              className="fixed inset-x-3 top-[max(3.5rem,env(safe-area-inset-top))] z-[100] max-h-[min(70dvh,28rem)] overflow-hidden rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-card)] shadow-2xl shadow-black/20 sm:absolute sm:inset-x-auto sm:right-0 sm:left-auto sm:top-full sm:z-50 sm:mt-2 sm:w-[min(22rem,calc(100vw-2rem))] sm:max-h-[22rem]"
               role="dialog"
               aria-label="Notifications"
             >
-              <p className="border-b border-[var(--app-border)] px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-[var(--app-muted)]">
-                Reactions on your activity
-              </p>
+              <div className="flex items-center gap-2 border-b border-[var(--app-border)] bg-[var(--app-accent)]/[0.06] px-3 py-3 sm:px-4">
+                <Bell className="h-4 w-4 shrink-0 text-[var(--app-accent)]" />
+                <p className="text-[13px] font-semibold text-[var(--foreground)]">
+                  Notifications
+                </p>
+              </div>
               {notif.items.length === 0 ? (
                 <p className="px-3 py-8 text-center text-sm text-[var(--app-muted)]">
-                  Nothing yet — when friends clap or comment, it shows up here.
+                  Nothing yet — when friends react or comment, or reply to your
+                  thread, it shows up here.
                 </p>
               ) : (
-                <ul className="max-h-[min(60dvh,20rem)] overflow-y-auto overscroll-contain py-1 sm:max-h-72">
+                <ul className="max-h-[min(60dvh,20rem)] overflow-y-auto overscroll-contain py-2 sm:max-h-[18rem]">
                   {notif.items.map((n) => (
                     <li
                       key={n.id}
-                      className="px-3 py-2.5 text-sm leading-snug text-[var(--foreground)] hover:bg-[var(--background)]/60"
+                      className="flex gap-3 border-b border-[var(--app-border)]/50 px-3 py-3 text-sm leading-snug text-[var(--foreground)] last:border-b-0 hover:bg-[var(--background)]/45 sm:px-4"
                     >
-                      <span className="font-medium">{n.actorLabel}</span>{" "}
-                      {n.type === "CLAP"
-                        ? "clapped your activity"
-                        : "commented on your activity"}
-                      {n.sessionSummarySnippet ? (
-                        <span className="mt-0.5 block text-xs text-[var(--app-muted)]">
-                          “{n.sessionSummarySnippet}”
-                        </span>
-                      ) : null}
+                      <span
+                        className={`mt-0.5 flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${
+                          n.type === "CLAP"
+                            ? "bg-amber-500/15 text-amber-700 dark:text-amber-400"
+                            : "bg-[var(--app-accent)]/12 text-[var(--app-accent)]"
+                        }`}
+                      >
+                        {n.type === "CLAP" ? (
+                          <Sparkles className="h-5 w-5" aria-hidden />
+                        ) : (
+                          <MessageCircle className="h-5 w-5" aria-hidden />
+                        )}
+                      </span>
+                      <div className="min-w-0 flex-1 pt-0.5">
+                        <p>
+                          <span className="font-semibold">{n.actorLabel}</span>{" "}
+                          {n.type === "CLAP"
+                            ? "reacted to your activity"
+                            : n.isOnYourSession !== false
+                              ? "commented on your activity"
+                              : "replied on a session you commented on"}
+                        </p>
+                        {n.sessionSummarySnippet ? (
+                          <span className="mt-1.5 block rounded-lg bg-[var(--background)]/60 px-2 py-1.5 text-xs text-[var(--app-muted)]">
+                            “{n.sessionSummarySnippet}”
+                          </span>
+                        ) : null}
+                      </div>
                     </li>
                   ))}
                 </ul>
